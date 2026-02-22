@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "Character+",
+    "slug": "character-plus",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#f2f6ff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#f2f6ff"
+      },
+      "package": "com.characterplus.app"
+    },
+    "plugins": [
+      "expo-notifications"
+    ]
+  }
+}
