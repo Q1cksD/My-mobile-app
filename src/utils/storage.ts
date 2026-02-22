@@ -12,6 +12,10 @@ export const defaultState: AppState = {
     endHour: 21,
   },
   checkins: [],
+  profile: {
+    name: '',
+    onboardingCompleted: false,
+  },
 };
 
 export async function loadState(): Promise<AppState> {
@@ -22,12 +26,17 @@ export async function loadState(): Promise<AppState> {
 
   try {
     const parsed = JSON.parse(raw) as AppState;
+    const parsed = JSON.parse(raw) as Partial<AppState>;
     return {
       ...defaultState,
       ...parsed,
       reminderSettings: {
         ...defaultState.reminderSettings,
         ...parsed.reminderSettings,
+      },
+      profile: {
+        ...defaultState.profile,
+        ...parsed.profile,
       },
       goals: parsed.goals ?? [],
       checkins: parsed.checkins ?? [],

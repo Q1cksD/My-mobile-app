@@ -12,20 +12,21 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@react-native-async-storage/async-storage": "1.23.1",
-    "expo": "~51.0.28",
-    "expo-notifications": "~0.28.19",
-    "expo-status-bar": "~1.12.1",
-    "react": "18.2.0",
-    "react-native": "0.74.5"
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "expo": "^54.0.33",
+    "expo-notifications": "~0.32.16",
+    "expo-status-bar": "~3.0.9",
+    "react": "19.1.0",
+    "react-native": "0.81.5"
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",
-    "@types/react": "~18.2.79",
+    "@types/react": "~19.1.10",
     "@typescript-eslint/eslint-plugin": "^8.14.0",
     "@typescript-eslint/parser": "^8.14.0",
+    "babel-preset-expo": "~54.0.10",
     "eslint": "^9.14.0",
-    "eslint-config-expo": "~7.1.2",
-    "typescript": "~5.3.3"
+    "eslint-config-expo": "~10.0.0",
+    "typescript": "~5.9.2"
   }
 }
