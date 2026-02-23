@@ -15,6 +15,7 @@ export const defaultState: AppState = {
   profile: {
     name: '',
     onboardingCompleted: false,
+    isPremium: false,
   },
 };
 

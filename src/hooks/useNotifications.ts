@@ -15,18 +15,22 @@ Notifications.setNotificationHandler({
 
 function randomReminder(goals: UserGoal[]): string {
   if (goals.length === 0) {
-    return 'Сделай маленький полезный шаг прямо сейчас.';
+    return 'Сделай небольшой полезный шаг прямо сейчас.';
   }
 
   const goal = goals[Math.floor(Math.random() * goals.length)];
-  const template = GOAL_TEMPLATES.find((t) => t.id === goal?.category);
-  const defaultText = goal?.customAction || 'Выбери полезное действие на этот час.';
+  const template = GOAL_TEMPLATES.find((item) => item.id === goal?.category);
+  const fallback = goal?.customAction || 'Выбери полезное действие на этот час.';
 
   if (!template || template.reminders.length === 0) {
-    return defaultText;
+    return fallback;
   }
 
-  return template.reminders[Math.floor(Math.random() * template.reminders.length)] ?? defaultText;
+  return template.reminders[Math.floor(Math.random() * template.reminders.length)] ?? fallback;
+}
+
+function normalizeHour(value: number): number {
+  return Math.max(0, Math.min(23, Math.floor(value)));
 }
 
 export function useNotifications() {
@@ -41,17 +45,35 @@ export function useNotifications() {
     const granted = permissions.granted || permissions.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL;
 
     if (!granted) {
-      const ask = await Notifications.requestPermissionsAsync();
-      if (!ask.granted) {
+      const request = await Notifications.requestPermissionsAsync();
+      if (!request.granted) {
         return;
       }
     }
 
-    const slots = Math.max(1, settings.timesPerDay);
-    const interval = Math.max(1, Math.floor((settings.endHour - settings.startHour) / slots));
+    const slots = Math.max(1, Math.min(8, settings.timesPerDay));
+    const startHour = normalizeHour(settings.startHour);
+    const endHour = normalizeHour(settings.endHour);
+
+    if (endHour <= startHour) {
+      return;
+    }
+
+    const totalMinutes = (endHour - startHour) * 60;
+    const stepMinutes = Math.max(1, Math.floor(totalMinutes / slots));
+    const usedTimes = new Set<string>();
 
     for (let i = 0; i < slots; i += 1) {
-      const hour = Math.min(23, settings.startHour + i * interval);
+      const offset = i * stepMinutes;
+      const hour = Math.min(23, startHour + Math.floor(offset / 60));
+      const minute = Math.min(59, offset % 60);
+      const triggerKey = `${hour}:${minute}`;
+
+      if (usedTimes.has(triggerKey)) {
+        continue;
+      }
+      usedTimes.add(triggerKey);
+
       await Notifications.scheduleNotificationAsync({
         content: {
           title: 'Character+ напоминание',
@@ -60,7 +82,7 @@ export function useNotifications() {
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.DAILY,
           hour,
-          minute: 0,
+          minute,
         },
       });
     }

@@ -15,11 +15,14 @@ import { GoalCard } from './components/GoalCard';
 import { SectionCard } from './components/SectionCard';
 import { GOAL_TEMPLATES } from './constants/templates';
 import { useNotifications } from './hooks/useNotifications';
-import { AppState, GoalCategory, UserGoal } from './types';
-import { last7Days, todayKey } from './utils/date';
+import { HistoryRange, HistoryScreen } from './screens/HistoryScreen';
+import { HomeScreen } from './screens/HomeScreen';
+import { PremiumScreen } from './screens/PremiumScreen';
+import { AppState, DailyCheckin, GoalCategory, UserGoal } from './types';
+import { lastNDays, todayKey } from './utils/date';
 import { defaultState, loadState, saveState } from './utils/storage';
 
-type TabKey = 'home' | 'settings' | 'profile';
+type TabKey = 'home' | 'history' | 'settings' | 'premium' | 'profile';
 
 function createGoal(category: GoalCategory): UserGoal {
   const template = GOAL_TEMPLATES.find((item) => item.id === category);
@@ -32,12 +35,22 @@ function createGoal(category: GoalCategory): UserGoal {
   };
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function hourLabel(hour: number): string {
+  return `${String(hour).padStart(2, '0')}:00`;
+}
+
 export default function App() {
   const [state, setState] = useState<AppState>(defaultState);
   const [loaded, setLoaded] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>('home');
   const [onboardingStep, setOnboardingStep] = useState(1);
-  const [noteInput, setNoteInput] = useState('');
+  const [historyRange, setHistoryRange] = useState<HistoryRange>(7);
+  const [checkinScore, setCheckinScore] = useState<number | null>(null);
+  const [checkinNote, setCheckinNote] = useState('');
   const { setupNotifications } = useNotifications();
 
   useEffect(() => {
@@ -71,17 +84,36 @@ export default function App() {
     void setupNotifications(state.reminderSettings, activeGoalsList);
   }, [activeGoalsList, loaded, setupNotifications, state.reminderSettings]);
 
+  useEffect(() => {
+    setCheckinScore(todayCheckin?.score ?? null);
+    setCheckinNote(todayCheckin?.note ?? '');
+  }, [todayCheckin]);
+
   const weeklySuccess = useMemo(() => {
-    const week = new Set(last7Days());
+    const week = new Set(lastNDays(7));
     const weekCheckins = state.checkins.filter((item) => week.has(item.date));
+    const successful = weekCheckins.filter((item) => item.score >= 4).length;
 
-    if (weekCheckins.length === 0) {
-      return 0;
-    }
-
-    const goodDays = weekCheckins.filter((item) => item.score >= 4).length;
-    return Math.round((goodDays / 7) * 100);
+    return Math.round((successful / 7) * 100);
   }, [state.checkins]);
+
+  const historyData = useMemo(() => {
+    const dates = new Set(lastNDays(historyRange));
+    const records = state.checkins
+      .filter((item) => dates.has(item.date))
+      .sort((a, b) => b.date.localeCompare(a.date));
+    const avg =
+      records.length > 0 ? (records.reduce((sum, item) => sum + item.score, 0) / records.length).toFixed(1) : '0.0';
+    const strongDays = records.filter((item) => item.score >= 4).length;
+    const completion = Math.round((records.length / historyRange) * 100);
+
+    return {
+      records,
+      average: avg,
+      strongDays,
+      completion,
+    };
+  }, [historyRange, state.checkins]);
 
   const toggleGoal = (category: GoalCategory) => {
     setState((prev) => {
@@ -103,14 +135,47 @@ export default function App() {
     }));
   };
 
-  const saveTodayCheckin = (score: number) => {
-    if (score < 1 || score > 5) {
+  const updateReminderWindow = (field: 'startHour' | 'endHour', delta: number) => {
+    setState((prev) => {
+      let startHour = prev.reminderSettings.startHour;
+      let endHour = prev.reminderSettings.endHour;
+
+      if (field === 'startHour') {
+        startHour = clamp(startHour + delta, 0, 22);
+        if (startHour >= endHour) {
+          endHour = clamp(startHour + 1, 1, 23);
+        }
+      } else {
+        endHour = clamp(endHour + delta, 1, 23);
+        if (endHour <= startHour) {
+          startHour = clamp(endHour - 1, 0, 22);
+        }
+      }
+
+      return {
+        ...prev,
+        reminderSettings: {
+          ...prev.reminderSettings,
+          startHour,
+          endHour,
+        },
+      };
+    });
+  };
+
+  const saveTodayCheckin = () => {
+    if (checkinScore === null) {
+      Alert.alert('Выберите оценку', 'Нужно выбрать оценку дня от 1 до 5.');
       return;
     }
 
     setState((prev) => {
-      const existing = prev.checkins.find((item) => item.date === today);
-      const checkin = { date: today, score, note: noteInput.trim() };
+      const checkin: DailyCheckin = {
+        date: today,
+        score: checkinScore,
+        note: checkinNote.trim(),
+      };
+      const existing = prev.checkins.some((item) => item.date === today);
 
       return {
         ...prev,
@@ -120,7 +185,7 @@ export default function App() {
       };
     });
 
-    Alert.alert('Сохранено', 'Чек-ин за сегодня сохранён. Отличная работа!');
+    Alert.alert('Сохранено', 'Чек-ин за сегодня сохранён.');
   };
 
   const finishOnboarding = () => {
@@ -143,6 +208,8 @@ export default function App() {
     }));
     setActiveTab('home');
   };
+
+  const openPaywall = () => setActiveTab('premium');
 
   const renderSettingsContent = () => (
     <>
@@ -169,7 +236,7 @@ export default function App() {
         })}
       </SectionCard>
 
-      <SectionCard title="Напоминания" subtitle="Включите push-уведомления и настройте частоту">
+      <SectionCard title="Напоминания" subtitle="Настройте частоту и окно времени уведомлений">
         <View style={styles.rowBetween}>
           <Text style={styles.label}>Включить напоминания</Text>
           <Switch
@@ -217,9 +284,36 @@ export default function App() {
             </Pressable>
           </View>
         </View>
+
+        <View style={styles.rowBetween}>
+          <Text style={styles.label}>Начало окна</Text>
+          <View style={styles.counterRow}>
+            <Pressable style={styles.counterBtn} onPress={() => updateReminderWindow('startHour', -1)}>
+              <Text style={styles.counterBtnText}>-</Text>
+            </Pressable>
+            <Text style={styles.counterValue}>{hourLabel(state.reminderSettings.startHour)}</Text>
+            <Pressable style={styles.counterBtn} onPress={() => updateReminderWindow('startHour', 1)}>
+              <Text style={styles.counterBtnText}>+</Text>
+            </Pressable>
+          </View>
+        </View>
+
+        <View style={styles.rowBetween}>
+          <Text style={styles.label}>Конец окна</Text>
+          <View style={styles.counterRow}>
+            <Pressable style={styles.counterBtn} onPress={() => updateReminderWindow('endHour', -1)}>
+              <Text style={styles.counterBtnText}>-</Text>
+            </Pressable>
+            <Text style={styles.counterValue}>{hourLabel(state.reminderSettings.endHour)}</Text>
+            <Pressable style={styles.counterBtn} onPress={() => updateReminderWindow('endHour', 1)}>
+              <Text style={styles.counterBtnText}>+</Text>
+            </Pressable>
+          </View>
+        </View>
+
         <Text style={styles.helper}>
-          Активных целей: {activeGoals}. Напоминания отправляются в интервале {state.reminderSettings.startHour}:00-
-          {state.reminderSettings.endHour}:00.
+          Активных целей: {activeGoals}. Напоминания отправляются в интервале{' '}
+          {hourLabel(state.reminderSettings.startHour)}-{hourLabel(state.reminderSettings.endHour)}.
         </Text>
       </SectionCard>
     </>
@@ -263,13 +357,15 @@ export default function App() {
 
             {onboardingStep === 3 ? (
               <>
-                <Text style={styles.helper}>Почти готово, {state.profile.name || 'друг'}!</Text>
+                <Text style={styles.helper}>Почти готово, {state.profile.name || 'друг'}.</Text>
                 <Text style={styles.helper}>Выбрано целей: {activeGoals}</Text>
                 <Text style={styles.helper}>
                   Напоминания: {state.reminderSettings.enabled ? 'включены' : 'выключены'},{' '}
                   {state.reminderSettings.timesPerDay} раз(а) в день
                 </Text>
-                <Text style={styles.helper}>Нажмите «Завершить», чтобы перейти на Главную.</Text>
+                <Text style={styles.helper}>
+                  Окно: {hourLabel(state.reminderSettings.startHour)}-{hourLabel(state.reminderSettings.endHour)}
+                </Text>
               </>
             ) : null}
           </SectionCard>
@@ -302,56 +398,63 @@ export default function App() {
       <StatusBar style="dark" />
       <ScrollView contentContainerStyle={styles.content}>
         {activeTab === 'home' ? (
-          <>
-            <Text style={styles.appTitle}>Главная</Text>
-            <Text style={styles.appSubtitle}>С возвращением, {state.profile.name || 'друг'}</Text>
-            <SectionCard title="Сегодня" subtitle="Краткая сводка перед началом дня">
-              <Text style={styles.metric}>Активных целей: {activeGoals}</Text>
-              <Text style={styles.metric}>Чек-ин сегодня: {todayCheckin ? `${todayCheckin.score}/5` : 'нет записи'}</Text>
-              <Text style={styles.helper}>Неделя: {weeklySuccess}% последовательности.</Text>
-            </SectionCard>
-            <SectionCard title="Быстрый чек-ин" subtitle="Отметьте, как прошёл день">
-              <View style={styles.scoreRow}>
-                {[1, 2, 3, 4, 5].map((score) => (
-                  <Pressable
-                    key={score}
-                    style={[styles.scoreBtn, todayCheckin?.score === score ? styles.scoreBtnActive : null]}
-                    onPress={() => saveTodayCheckin(score)}
-                  >
-                    <Text style={[styles.scoreText, todayCheckin?.score === score ? styles.scoreTextActive : null]}>
-                      {score}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            </SectionCard>
-          </>
+          <HomeScreen
+            userName={state.profile.name}
+            activeGoals={activeGoals}
+            weeklySuccess={weeklySuccess}
+            todayCheckin={todayCheckin}
+            checkinScore={checkinScore}
+            checkinNote={checkinNote}
+            onScoreChange={setCheckinScore}
+            onNoteChange={setCheckinNote}
+            onSaveCheckin={saveTodayCheckin}
+          />
+        ) : null}
+
+        {activeTab === 'history' ? (
+          <HistoryScreen
+            historyRange={historyRange}
+            historyData={historyData}
+            isPremium={state.profile.isPremium}
+            onRangeSelect={setHistoryRange}
+            onOpenPremium={openPaywall}
+          />
         ) : null}
 
         {activeTab === 'settings' ? (
           <>
-            <Text style={styles.appTitle}>Основная</Text>
-            <Text style={styles.appSubtitle}>Здесь настраиваются цели и напоминания</Text>
+            <Text style={styles.appTitle}>Настройки</Text>
+            <Text style={styles.appSubtitle}>Цели, напоминания и окно времени</Text>
             {renderSettingsContent()}
           </>
+        ) : null}
+
+        {activeTab === 'premium' ? (
+          <PremiumScreen
+            isPremium={state.profile.isPremium}
+            onTogglePremium={() =>
+              setState((prev) => ({
+                ...prev,
+                profile: { ...prev.profile, isPremium: !prev.profile.isPremium },
+              }))
+            }
+            onContinueFree={() => setActiveTab('home')}
+          />
         ) : null}
 
         {activeTab === 'profile' ? (
           <>
             <Text style={styles.appTitle}>Профиль</Text>
-            <Text style={styles.appSubtitle}>Раздел под будущие функции</Text>
-            <SectionCard title="Пока что здесь" subtitle="Базовая информация пользователя">
+            <Text style={styles.appSubtitle}>Базовые данные и статус подписки</Text>
+            <SectionCard title="Пользователь">
               <Text style={styles.metric}>Имя: {state.profile.name || 'не указано'}</Text>
-              <Text style={styles.helper}>В будущем сюда можно добавить достижения, статистику и настройки аккаунта.</Text>
+              <Text style={styles.metric}>Статус: {state.profile.isPremium ? 'Premium' : 'Free'}</Text>
             </SectionCard>
-            <SectionCard title="Заметка дня" subtitle="Один вывод, который хотите запомнить">
-              <TextInput
-                style={[styles.input, styles.noteInput]}
-                placeholder="Короткая заметка: что сработало или помешало"
-                value={noteInput}
-                onChangeText={setNoteInput}
-                multiline
-              />
+            <SectionCard title="Подписка">
+              <Text style={styles.helper}>Оплата пока не подключена. Экран Premium готов как каркас.</Text>
+              <Pressable style={styles.primaryBtn} onPress={openPaywall}>
+                <Text style={styles.primaryBtnText}>Открыть Premium экран</Text>
+              </Pressable>
             </SectionCard>
           </>
         ) : null}
@@ -359,10 +462,16 @@ export default function App() {
 
       <View style={styles.tabBar}>
         <Pressable style={styles.tabBtn} onPress={() => setActiveTab('home')}>
-          <Text style={[styles.tabText, activeTab === 'home' ? styles.tabTextActive : null]}>Главная</Text>
+          <Text style={[styles.tabText, activeTab === 'home' ? styles.tabTextActive : null]}>Дом</Text>
+        </Pressable>
+        <Pressable style={styles.tabBtn} onPress={() => setActiveTab('history')}>
+          <Text style={[styles.tabText, activeTab === 'history' ? styles.tabTextActive : null]}>История</Text>
         </Pressable>
         <Pressable style={styles.tabBtn} onPress={() => setActiveTab('settings')}>
-          <Text style={[styles.tabText, activeTab === 'settings' ? styles.tabTextActive : null]}>Основная</Text>
+          <Text style={[styles.tabText, activeTab === 'settings' ? styles.tabTextActive : null]}>Настр.</Text>
+        </Pressable>
+        <Pressable style={styles.tabBtn} onPress={() => setActiveTab('premium')}>
+          <Text style={[styles.tabText, activeTab === 'premium' ? styles.tabTextActive : null]}>Premium</Text>
         </Pressable>
         <Pressable style={styles.tabBtn} onPress={() => setActiveTab('profile')}>
           <Text style={[styles.tabText, activeTab === 'profile' ? styles.tabTextActive : null]}>Профиль</Text>
@@ -379,7 +488,7 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 16,
-    paddingBottom: 100,
+    paddingBottom: 120,
   },
   appTitle: {
     fontSize: 28,
@@ -441,7 +550,7 @@ const styles = StyleSheet.create({
     color: '#3553a1',
   },
   counterValue: {
-    minWidth: 28,
+    minWidth: 50,
     textAlign: 'center',
     color: '#1d2b50',
     fontWeight: '700',
@@ -450,37 +559,6 @@ const styles = StyleSheet.create({
     color: '#5b6e99',
     lineHeight: 20,
     marginTop: 4,
-  },
-  scoreRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  scoreBtn: {
-    width: 52,
-    height: 52,
-    borderRadius: 12,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#dbe5ff',
-  },
-  scoreBtnActive: {
-    backgroundColor: '#4169e1',
-    borderColor: '#4169e1',
-  },
-  scoreText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#3553a1',
-  },
-  scoreTextActive: {
-    color: '#fff',
-  },
-  noteInput: {
-    minHeight: 80,
-    textAlignVertical: 'top',
   },
   metric: {
     fontSize: 16,
@@ -508,7 +586,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   primaryBtn: {
-    flex: 1,
     borderRadius: 12,
     paddingVertical: 12,
     alignItems: 'center',
@@ -541,6 +618,7 @@ const styles = StyleSheet.create({
   tabText: {
     color: '#7890c7',
     fontWeight: '700',
+    fontSize: 12,
   },
   tabTextActive: {
     color: '#355ad4',
