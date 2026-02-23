@@ -1,4 +1,7 @@
+export type GoalCategory = 'calmness' | 'discipline' | 'kindness' | 'focus' | 'punctuality';
+
 export interface GoalTemplate {
+  id: GoalCategory;
    title: string;
    description: string;
    reminders: string[];
@@ -24,14 +27,14 @@ export interface GoalTemplate {
    note: string;
  }
  
-+export interface UserProfile {
-+  name: string;
-+  onboardingCompleted: boolean;
-+}
-+
+export interface UserProfile {
+  name: string;
+  onboardingCompleted: boolean;
+}
+
  export interface AppState {
    goals: UserGoal[];
    reminderSettings: ReminderSettings;
    checkins: DailyCheckin[];
-+  profile: UserProfile;
+  profile: UserProfile;
  }

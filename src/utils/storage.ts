@@ -25,7 +25,6 @@ export async function loadState(): Promise<AppState> {
   }
 
   try {
-    const parsed = JSON.parse(raw) as AppState;
     const parsed = JSON.parse(raw) as Partial<AppState>;
     return {
       ...defaultState,

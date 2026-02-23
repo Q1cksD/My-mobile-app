@@ -6,6 +6,8 @@ import { ReminderSettings, UserGoal } from '../types';
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: false,
     shouldSetBadge: false,
   }),
@@ -56,9 +58,9 @@ export function useNotifications() {
           body: randomReminder(goals),
         },
         trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.DAILY,
           hour,
           minute: 0,
-          repeats: true,
         },
       });
     }
