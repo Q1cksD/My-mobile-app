@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
   StyleSheet,
+  StatusBar as RNStatusBar,
   Switch,
   Text,
   TextInput,
   View,
 } from 'react-native';
-import { StatusBar } from 'expo-status-bar';
+import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import { GoalCard } from './components/GoalCard';
 import { SectionCard } from './components/SectionCard';
 import { GOAL_TEMPLATES } from './constants/templates';
@@ -18,6 +20,7 @@ import { useNotifications } from './hooks/useNotifications';
 import { HistoryRange, HistoryScreen } from './screens/HistoryScreen';
 import { HomeScreen } from './screens/HomeScreen';
 import { PremiumScreen } from './screens/PremiumScreen';
+import { ProfileMenuScreen } from './screens/ProfileMenuScreen';
 import { AppState, DailyCheckin, GoalCategory, UserGoal } from './types';
 import { lastNDays, todayKey } from './utils/date';
 import { defaultState, loadState, saveState } from './utils/storage';
@@ -26,7 +29,6 @@ type TabKey = 'home' | 'history' | 'settings' | 'premium' | 'profile';
 
 function createGoal(category: GoalCategory): UserGoal {
   const template = GOAL_TEMPLATES.find((item) => item.id === category);
-
   return {
     id: `${category}-${Date.now()}`,
     category,
@@ -46,12 +48,14 @@ function hourLabel(hour: number): string {
 export default function App() {
   const [state, setState] = useState<AppState>(defaultState);
   const [loaded, setLoaded] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabKey>('home');
+  const [activeTab, setActiveTab] = useState<TabKey>('settings');
   const [onboardingStep, setOnboardingStep] = useState(1);
   const [historyRange, setHistoryRange] = useState<HistoryRange>(7);
   const [checkinScore, setCheckinScore] = useState<number | null>(null);
   const [checkinNote, setCheckinNote] = useState('');
   const { setupNotifications } = useNotifications();
+
+  const androidTopInset = Platform.OS === 'android' ? (RNStatusBar.currentHeight ?? 0) : 0;
 
   useEffect(() => {
     async function bootstrap() {
@@ -93,7 +97,6 @@ export default function App() {
     const week = new Set(lastNDays(7));
     const weekCheckins = state.checkins.filter((item) => week.has(item.date));
     const successful = weekCheckins.filter((item) => item.score >= 4).length;
-
     return Math.round((successful / 7) * 100);
   }, [state.checkins]);
 
@@ -102,23 +105,17 @@ export default function App() {
     const records = state.checkins
       .filter((item) => dates.has(item.date))
       .sort((a, b) => b.date.localeCompare(a.date));
-    const avg =
+    const average =
       records.length > 0 ? (records.reduce((sum, item) => sum + item.score, 0) / records.length).toFixed(1) : '0.0';
     const strongDays = records.filter((item) => item.score >= 4).length;
     const completion = Math.round((records.length / historyRange) * 100);
 
-    return {
-      records,
-      average: avg,
-      strongDays,
-      completion,
-    };
+    return { records, average, strongDays, completion };
   }, [historyRange, state.checkins]);
 
   const toggleGoal = (category: GoalCategory) => {
     setState((prev) => {
       const existing = prev.goals.find((goal) => goal.category === category);
-
       return {
         ...prev,
         goals: existing
@@ -188,6 +185,12 @@ export default function App() {
     Alert.alert('Сохранено', 'Чек-ин за сегодня сохранён.');
   };
 
+  const selectMenuItem = (tab: TabKey) => {
+    setActiveTab(tab);
+  };
+
+  const openPaywall = () => selectMenuItem('premium');
+
   const finishOnboarding = () => {
     if (!state.profile.name.trim()) {
       Alert.alert('Нужно имя', 'Добавьте имя, чтобы завершить приветствие.');
@@ -206,10 +209,8 @@ export default function App() {
         onboardingCompleted: true,
       },
     }));
-    setActiveTab('home');
+    setActiveTab('settings');
   };
-
-  const openPaywall = () => setActiveTab('premium');
 
   const renderSettingsContent = () => (
     <>
@@ -219,7 +220,6 @@ export default function App() {
       >
         {GOAL_TEMPLATES.map((template) => {
           const selected = state.goals.find((goal) => goal.category === template.id);
-
           return (
             <View key={template.id}>
               <GoalCard template={template} selected={selected} onToggle={toggleGoal} />
@@ -330,7 +330,7 @@ export default function App() {
   if (!state.profile.onboardingCompleted) {
     return (
       <SafeAreaView style={styles.container}>
-        <StatusBar style="dark" />
+        <ExpoStatusBar style="dark" />
         <ScrollView contentContainerStyle={styles.content}>
           <Text style={styles.appTitle}>Добро пожаловать в Character+</Text>
           <Text style={styles.appSubtitle}>Сделаем короткую первичную настройку в 3 шага.</Text>
@@ -395,7 +395,20 @@ export default function App() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar style="dark" />
+      <ExpoStatusBar style="dark" />
+
+      <View style={[styles.topStatsBar, { paddingTop: androidTopInset + 8 }]}>
+        <View style={styles.topStatsLeft}>
+          <Text style={styles.topStatItem}>Цели: {activeGoals}</Text>
+          <Text style={styles.topStatItem}>Сегодня: {todayCheckin ? `${todayCheckin.score}/5` : '-'}</Text>
+          <Text style={styles.topStatItem}>7д: {weeklySuccess}%</Text>
+        </View>
+        <Pressable style={styles.profileBtn} onPress={() => selectMenuItem('profile')}>
+          <Text style={styles.profileBtnText}>Профиль</Text>
+        </Pressable>
+      </View>
+      <View style={styles.topDivider} />
+
       <ScrollView contentContainerStyle={styles.content}>
         {activeTab === 'home' ? (
           <HomeScreen
@@ -438,45 +451,18 @@ export default function App() {
                 profile: { ...prev.profile, isPremium: !prev.profile.isPremium },
               }))
             }
-            onContinueFree={() => setActiveTab('home')}
+            onContinueFree={() => selectMenuItem('settings')}
           />
         ) : null}
 
         {activeTab === 'profile' ? (
-          <>
-            <Text style={styles.appTitle}>Профиль</Text>
-            <Text style={styles.appSubtitle}>Базовые данные и статус подписки</Text>
-            <SectionCard title="Пользователь">
-              <Text style={styles.metric}>Имя: {state.profile.name || 'не указано'}</Text>
-              <Text style={styles.metric}>Статус: {state.profile.isPremium ? 'Premium' : 'Free'}</Text>
-            </SectionCard>
-            <SectionCard title="Подписка">
-              <Text style={styles.helper}>Оплата пока не подключена. Экран Premium готов как каркас.</Text>
-              <Pressable style={styles.primaryBtn} onPress={openPaywall}>
-                <Text style={styles.primaryBtnText}>Открыть Premium экран</Text>
-              </Pressable>
-            </SectionCard>
-          </>
+          <ProfileMenuScreen
+            name={state.profile.name}
+            isPremium={state.profile.isPremium}
+            onNavigate={selectMenuItem}
+          />
         ) : null}
       </ScrollView>
-
-      <View style={styles.tabBar}>
-        <Pressable style={styles.tabBtn} onPress={() => setActiveTab('home')}>
-          <Text style={[styles.tabText, activeTab === 'home' ? styles.tabTextActive : null]}>Дом</Text>
-        </Pressable>
-        <Pressable style={styles.tabBtn} onPress={() => setActiveTab('history')}>
-          <Text style={[styles.tabText, activeTab === 'history' ? styles.tabTextActive : null]}>История</Text>
-        </Pressable>
-        <Pressable style={styles.tabBtn} onPress={() => setActiveTab('settings')}>
-          <Text style={[styles.tabText, activeTab === 'settings' ? styles.tabTextActive : null]}>Настр.</Text>
-        </Pressable>
-        <Pressable style={styles.tabBtn} onPress={() => setActiveTab('premium')}>
-          <Text style={[styles.tabText, activeTab === 'premium' ? styles.tabTextActive : null]}>Premium</Text>
-        </Pressable>
-        <Pressable style={styles.tabBtn} onPress={() => setActiveTab('profile')}>
-          <Text style={[styles.tabText, activeTab === 'profile' ? styles.tabTextActive : null]}>Профиль</Text>
-        </Pressable>
-      </View>
     </SafeAreaView>
   );
 }
@@ -486,9 +472,47 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#eef3ff',
   },
+  topStatsBar: {
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+    backgroundColor: '#f7faff',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  topStatsLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flexWrap: 'wrap',
+    flex: 1,
+  },
+  topStatItem: {
+    color: '#4f6288',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  profileBtn: {
+    borderWidth: 1,
+    borderColor: '#c6d6fb',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: '#fff',
+    marginLeft: 8,
+  },
+  profileBtnText: {
+    color: '#2f53b6',
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  topDivider: {
+    height: 1,
+    backgroundColor: '#d8e4ff',
+  },
   content: {
     padding: 16,
-    paddingBottom: 120,
+    paddingBottom: 24,
   },
   appTitle: {
     fontSize: 28,
@@ -560,12 +584,6 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginTop: 4,
   },
-  metric: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#1d2b50',
-    marginBottom: 6,
-  },
   onboardingActions: {
     marginTop: 8,
     flexDirection: 'row',
@@ -597,30 +615,5 @@ const styles = StyleSheet.create({
   },
   disabledBtn: {
     opacity: 0.5,
-  },
-  tabBar: {
-    position: 'absolute',
-    left: 12,
-    right: 12,
-    bottom: 12,
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    flexDirection: 'row',
-    borderWidth: 1,
-    borderColor: '#d7e2ff',
-    paddingVertical: 4,
-  },
-  tabBtn: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  tabText: {
-    color: '#7890c7',
-    fontWeight: '700',
-    fontSize: 12,
-  },
-  tabTextActive: {
-    color: '#355ad4',
   },
 });
