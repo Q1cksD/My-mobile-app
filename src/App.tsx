@@ -1115,10 +1115,6 @@ export default function App() {
 
     return (
       <>
-        <Pressable style={styles.backBtn} onPress={() => setSettingsSection(null)}>
-          <Text style={styles.backBtnText}>{'< Назад'}</Text>
-        </Pressable>
-
         <Text style={styles.sectionHeaderTitle}>{selectedSettingsBlock.title}</Text>
 
         <Pressable style={styles.blockTopAddBtn} onPress={openTaskWizard}>
@@ -1287,15 +1283,28 @@ export default function App() {
     <SafeAreaView style={styles.container}>
       <ExpoStatusBar style="dark" />
 
-      <View style={[styles.topStatsBar, { paddingTop: androidTopInset + 8 }]}>
-        <View style={styles.topStatsLeft}>
-          <Text style={styles.topStatItem}>Цели: {activeGoals}</Text>
-          <Text style={styles.topStatItem}>Чек-ин: {todayCheckin ? `${todayCheckin.score}/5` : '-'}</Text>
-          <Text style={styles.topStatItem}>7д: {weeklySuccess}%</Text>
+      <View style={[styles.topStatsBar, { paddingTop: androidTopInset + 10 }]}>
+        <View style={styles.topBarSideLeft}>
+          {activeTab === 'settings' && settingsSection ? (
+            <Pressable style={styles.topBackBtn} onPress={() => setSettingsSection(null)}>
+              <Text style={styles.topBackBtnText}>{'< Назад'}</Text>
+            </Pressable>
+          ) : (
+            <View style={styles.topBackStub} />
+          )}
         </View>
-        <Pressable style={styles.profileBtn} onPress={() => selectMenuItem('profile')}>
-          <Text style={styles.profileBtnText}>Профиль</Text>
-        </Pressable>
+        <View style={styles.topBarCenter}>
+          <View style={styles.topStatsRow}>
+            <Text style={styles.topStatItem}>Цели: {activeGoals}</Text>
+            <Text style={styles.topStatItem}>Чек-ин: {todayCheckin ? `${todayCheckin.score}/5` : '-'}</Text>
+            <Text style={styles.topStatItem}>7д: {weeklySuccess}%</Text>
+          </View>
+        </View>
+        <View style={styles.topBarSideRight}>
+          <Pressable style={styles.profileBtn} onPress={() => selectMenuItem('profile')}>
+            <Text style={styles.profileBtnText}>Профиль</Text>
+          </Pressable>
+        </View>
       </View>
       <View style={styles.topDivider} />
 
@@ -2225,38 +2234,69 @@ const styles = StyleSheet.create({
     backgroundColor: '#eef3ff',
   },
   topStatsBar: {
-    paddingHorizontal: 16,
-    paddingBottom: 10,
+    paddingHorizontal: 14,
+    paddingBottom: 14,
     backgroundColor: '#f7faff',
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    minHeight: 82,
   },
-  topStatsLeft: {
+  topBarSideLeft: {
+    flex: 1,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+  },
+  topBarCenter: {
+    flex: 1.4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  topBarSideRight: {
+    flex: 1,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  topStatsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    justifyContent: 'center',
+    gap: 10,
     flexWrap: 'wrap',
-    flex: 1,
+  },
+  topBackBtn: {
+    borderWidth: 1,
+    borderColor: '#c6d6fb',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#fff',
+  },
+  topBackBtnText: {
+    color: '#2f53b6',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  topBackStub: {
+    width: 86,
+    height: 40,
   },
   topStatItem: {
     color: '#4f6288',
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
   },
   profileBtn: {
     borderWidth: 1,
     borderColor: '#c6d6fb',
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     backgroundColor: '#fff',
-    marginLeft: 8,
   },
   profileBtnText: {
     color: '#2f53b6',
     fontWeight: '700',
-    fontSize: 12,
+    fontSize: 13,
   },
   topDivider: {
     height: 1,
@@ -2359,35 +2399,26 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.5,
   },
-  backBtn: {
-    alignSelf: 'flex-start',
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#d6e1f8',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: '#fff',
-  },
-  backBtnText: {
-    color: '#3f568f',
-    fontWeight: '700',
-  },
   sectionHeaderTitle: {
     color: '#1f325f',
     fontWeight: '800',
-    fontSize: 24,
-    marginBottom: 8,
+    fontSize:32,
+    width: '100%',
+    textAlign: 'center',
+    marginBottom: 16,
+    paddingTop: 30,
+    paddingBottom: 30,
   },
   blockTopAddBtn: {
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#c4d5fb',
     backgroundColor: '#fff',
+    marginTop: 0,
     paddingVertical: 10,
     paddingHorizontal: 12,
     alignSelf: 'flex-start',
-    marginBottom: 12,
+    marginBottom: 18,
   },
   blockTopAddBtnText: {
     color: '#2e56b6',
