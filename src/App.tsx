@@ -387,6 +387,14 @@ export default function App() {
     dragY.setValue(0);
   };
 
+  const startDragFromPress = (blockId: string) => {
+    if (!isReorderMode || draggingBlockId === blockId) {
+      return;
+    }
+
+    startReorderForBlock(blockId);
+  };
+
   const applyReorder = () => {
     if (!isReorderMode) {
       return;
@@ -645,7 +653,7 @@ export default function App() {
       return (
         <>
           <Pressable style={styles.backBtn} onPress={() => setSettingsSection(null)}>
-            <Text style={styles.backBtnText}>{'< �����'}</Text>
+            <Text style={styles.backBtnText}>{'< Назад'}</Text>
           </Pressable>
           {renderTraitsSettings()}
         </>
@@ -655,7 +663,7 @@ export default function App() {
     return (
       <>
         <Pressable style={styles.backBtn} onPress={() => setSettingsSection(null)}>
-          <Text style={styles.backBtnText}>{'< �����'}</Text>
+          <Text style={styles.backBtnText}>{'< Назад'}</Text>
         </Pressable>
         <SectionCard title={selectedSettingsBlock.title} subtitle={sectionSubtitle(selectedSettingsBlock.kind)}>
           <TextInput
@@ -672,8 +680,8 @@ export default function App() {
 
   const renderSettingsHome = () => (
     <View style={styles.settingsGridWrap}>
-      {isReorderMode ? <Text style={styles.reorderHint}>���������� ����� � ������� ✓, ����� ���������</Text> : null}
-      <View style={styles.settingsGrid}>
+      {isReorderMode ? <Text style={styles.reorderHint}>Перетащите блоки и нажмите ✓, чтобы применить</Text> : null}
+      <View style={styles.settingsGrid} {...panResponder.panHandlers}>
         {visibleSettingsBlocks.map((block) => {
           const isDragging = draggingBlockId === block.id;
           return (
@@ -686,7 +694,17 @@ export default function App() {
                 isDragging ? styles.settingsCardGhost : null,
               ]}
               onPress={() => openBlock(block.id)}
-              onLongPress={() => startReorderForBlock(block.id)}
+              onLongPress={() => {
+                if (!isReorderMode) {
+                  startReorderForBlock(block.id);
+                }
+              }}
+              onPressIn={() => startDragFromPress(block.id)}
+              onPressOut={() => {
+                if (draggingBlockId === block.id) {
+                  finishDrag();
+                }
+              }}
               delayLongPress={180}
               disabled={Boolean(draggingBlockId) && !isDragging}
             >
@@ -702,7 +720,7 @@ export default function App() {
                   <Text style={styles.settingsMenuBtnText}>⋮</Text>
                 </Pressable>
               ) : (
-                <Text style={styles.dragHint}>����������</Text>
+                <Text style={styles.dragHint}>Перетаскивание</Text>
               )}
             </Pressable>
           );
@@ -723,7 +741,6 @@ export default function App() {
                 transform: [{ translateY: dragY }],
               },
             ]}
-            {...panResponder.panHandlers}
           >
             <View style={[styles.settingsCardBtn, styles.dragOverlayCard, { backgroundColor: draggingBlock.color }]}>
               <Text style={styles.settingsCardText}>{draggingBlock.title}</Text>
@@ -883,9 +900,9 @@ export default function App() {
         <View style={styles.modalBackdrop}>
           <Pressable style={styles.modalDismissLayer} onPress={() => setActiveMenuBlockId(null)} />
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>{activeMenuBlock?.title ?? '����'}</Text>
+            <Text style={styles.modalTitle}>{activeMenuBlock?.title ?? 'Блок'}</Text>
             <Pressable style={styles.modalActionBtn} onPress={openRename}>
-              <Text style={styles.modalActionText}>�������������</Text>
+              <Text style={styles.modalActionText}>Переименовать</Text>
             </Pressable>
             <Pressable
               style={styles.modalActionBtn}
@@ -895,10 +912,10 @@ export default function App() {
                 }
               }}
             >
-              <Text style={[styles.modalActionText, styles.modalDangerText]}>������� ����</Text>
+              <Text style={[styles.modalActionText, styles.modalDangerText]}>Удалить блок</Text>
             </Pressable>
             <Pressable style={styles.modalCancelBtn} onPress={() => setActiveMenuBlockId(null)}>
-              <Text style={styles.modalCancelText}>�������</Text>
+              <Text style={styles.modalCancelText}>Закрыть</Text>
             </Pressable>
           </View>
         </View>
@@ -908,14 +925,14 @@ export default function App() {
         <View style={styles.modalBackdrop}>
           <Pressable style={styles.modalDismissLayer} onPress={() => setRenameBlockId(null)} />
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>�������� �����</Text>
-            <TextInput style={styles.modalInput} value={renameValue} onChangeText={setRenameValue} placeholder="������� ��������" />
+            <Text style={styles.modalTitle}>Название блока</Text>
+            <TextInput style={styles.modalInput} value={renameValue} onChangeText={setRenameValue} placeholder="Введите название" />
             <View style={styles.modalActionsRow}>
               <Pressable style={styles.modalCancelBtnSmall} onPress={() => setRenameBlockId(null)}>
-                <Text style={styles.modalCancelText}>������</Text>
+                <Text style={styles.modalCancelText}>Отмена</Text>
               </Pressable>
               <Pressable style={styles.modalConfirmBtn} onPress={applyRename}>
-                <Text style={styles.modalConfirmText}>���������</Text>
+                <Text style={styles.modalConfirmText}>Сохранить</Text>
               </Pressable>
             </View>
           </View>
@@ -926,7 +943,7 @@ export default function App() {
         <View style={styles.modalBackdrop}>
           <Pressable style={styles.modalDismissLayer} onPress={() => setIsAddModalVisible(false)} />
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>���������� �����</Text>
+            <Text style={styles.modalTitle}>Добавление блока</Text>
             <Pressable
               style={styles.modalActionBtn}
               onPress={() => {
@@ -935,7 +952,7 @@ export default function App() {
                 setIsNewBlockModalVisible(true);
               }}
             >
-              <Text style={styles.modalActionText}>�������� ����� ����</Text>
+              <Text style={styles.modalActionText}>Добавить новый блок</Text>
             </Pressable>
 
             {missingTemplateBlocks.map((template) => (
@@ -944,12 +961,12 @@ export default function App() {
                 style={styles.modalActionBtn}
                 onPress={() => addTemplateBlock(template.kind)}
               >
-                <Text style={styles.modalActionText}>�������� ������: {template.title}</Text>
+                <Text style={styles.modalActionText}>Добавить шаблон: {template.title}</Text>
               </Pressable>
             ))}
 
             <Pressable style={styles.modalCancelBtn} onPress={() => setIsAddModalVisible(false)}>
-              <Text style={styles.modalCancelText}>�������</Text>
+              <Text style={styles.modalCancelText}>Закрыть</Text>
             </Pressable>
           </View>
         </View>
@@ -964,19 +981,19 @@ export default function App() {
         <View style={styles.modalBackdrop}>
           <Pressable style={styles.modalDismissLayer} onPress={() => setIsNewBlockModalVisible(false)} />
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>����� ����</Text>
+            <Text style={styles.modalTitle}>Новый блок</Text>
             <TextInput
               style={styles.modalInput}
               value={newBlockName}
               onChangeText={setNewBlockName}
-              placeholder="������� ��������"
+              placeholder="Введите название"
             />
             <View style={styles.modalActionsRow}>
               <Pressable style={styles.modalCancelBtnSmall} onPress={() => setIsNewBlockModalVisible(false)}>
-                <Text style={styles.modalCancelText}>������</Text>
+                <Text style={styles.modalCancelText}>Отмена</Text>
               </Pressable>
               <Pressable style={styles.modalConfirmBtn} onPress={addCustomBlock}>
-                <Text style={styles.modalConfirmText}>��������</Text>
+                <Text style={styles.modalConfirmText}>Добавить</Text>
               </Pressable>
             </View>
           </View>
@@ -1334,4 +1351,3 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
 });
-
