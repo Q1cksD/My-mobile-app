@@ -110,35 +110,6 @@ function moveItem<T>(items: T[], from: number, to: number): T[] {
   return next;
 }
 
-function sectionSubtitle(kind: SettingsBlockKind): string | undefined {
-  if (kind === 'emotions') {
-    return 'Что вы хотите контролировать в течение недели';
-  }
-  if (kind === 'habits') {
-    return 'Опишите привычку, которую хотите добавить';
-  }
-  if (kind === 'values') {
-    return 'Сформулируйте личные принципы';
-  }
-  if (kind === 'custom') {
-    return 'Свободный блок заметок';
-  }
-  return undefined;
-}
-
-function sectionPlaceholder(kind: SettingsBlockKind): string {
-  if (kind === 'emotions') {
-    return 'Например: делать паузу и 3 глубоких вдоха перед ответом';
-  }
-  if (kind === 'habits') {
-    return 'Например: 20 минут чтения каждый день';
-  }
-  if (kind === 'values') {
-    return 'Например: быть последовательным и уважительным в общении';
-  }
-  return 'Введите описание или заметку';
-}
-
 function createTaskDraft(): TaskDraft {
   return {
     title: '',
@@ -154,6 +125,53 @@ function createTaskDraft(): TaskDraft {
       },
     },
   };
+}
+
+function cloneTaskReminders(reminders: TaskReminderSettings): TaskReminderSettings {
+  if (reminders.config.mode === 'fixed') {
+    return {
+      enabled: reminders.enabled,
+      config: {
+        mode: 'fixed',
+        weekdays: [...reminders.config.weekdays],
+        times: [...reminders.config.times],
+      },
+    };
+  }
+
+  return {
+    enabled: reminders.enabled,
+    config: {
+      mode: 'random',
+      weekdays: [...reminders.config.weekdays],
+      startHour: reminders.config.startHour,
+      endHour: reminders.config.endHour,
+      timesInWindow: reminders.config.timesInWindow,
+    },
+  };
+}
+
+function createTaskDraftFromTask(task: BlockTask): TaskDraft {
+  return {
+    title: task.title,
+    description: task.description,
+    motivation: task.motivation,
+    motivationImageUri: task.motivationImageUri,
+    reminders: cloneTaskReminders(task.reminders),
+  };
+}
+
+function isTaskReminderValid(reminders: TaskReminderSettings): boolean {
+  if (!reminders.enabled) {
+    return true;
+  }
+  if (!reminders.config.weekdays.length) {
+    return false;
+  }
+  if (reminders.config.mode === 'fixed') {
+    return reminders.config.times.length > 0;
+  }
+  return reminders.config.endHour > reminders.config.startHour;
 }
 
 function normalizeTimeValue(value: string): string | null {
@@ -210,8 +228,14 @@ export default function App() {
   const [taskDraft, setTaskDraft] = useState<TaskDraft>(createTaskDraft);
   const [taskBlockId, setTaskBlockId] = useState<string | null>(null);
   const [fixedTimeInput, setFixedTimeInput] = useState('');
+  const [isTaskEditModalVisible, setIsTaskEditModalVisible] = useState(false);
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [editTaskDraft, setEditTaskDraft] = useState<TaskDraft>(createTaskDraft);
+  const [editFixedTimeInput, setEditFixedTimeInput] = useState('');
   const [isImageUriModalVisible, setIsImageUriModalVisible] = useState(false);
   const [imageUriInput, setImageUriInput] = useState('');
+  const [isEditImageUriModalVisible, setIsEditImageUriModalVisible] = useState(false);
+  const [editImageUriInput, setEditImageUriInput] = useState('');
   const [isReorderMode, setIsReorderMode] = useState(false);
   const [draftBlocks, setDraftBlocks] = useState<SettingsBlock[]>([]);
   const [draggingBlockId, setDraggingBlockId] = useState<string | null>(null);
@@ -455,16 +479,6 @@ export default function App() {
     dragY.setValue(0);
   };
 
-  const upsertNote = (key: string, note: string) => {
-    setState((prev) => ({
-      ...prev,
-      sectionNotes: {
-        ...prev.sectionNotes,
-        [key]: note,
-      },
-    }));
-  };
-
   const openBlock = (blockId: string) => {
     if (isReorderMode) {
       return;
@@ -643,6 +657,22 @@ export default function App() {
     setFixedTimeInput('');
   };
 
+  const openTaskEditor = (task: BlockTask) => {
+    setEditingTaskId(task.id);
+    setEditTaskDraft(createTaskDraftFromTask(task));
+    setEditFixedTimeInput('');
+    setIsTaskEditModalVisible(true);
+  };
+
+  const closeTaskEditor = () => {
+    setIsTaskEditModalVisible(false);
+    setEditingTaskId(null);
+    setEditTaskDraft(createTaskDraft());
+    setEditFixedTimeInput('');
+    setIsEditImageUriModalVisible(false);
+    setEditImageUriInput('');
+  };
+
   const toggleReminderWeekday = (day: WeekdayKey) => {
     setTaskDraft((prev) => {
       const list = prev.reminders.config.weekdays;
@@ -734,6 +764,97 @@ export default function App() {
     });
   };
 
+  const toggleEditReminderWeekday = (day: WeekdayKey) => {
+    setEditTaskDraft((prev) => {
+      const list = prev.reminders.config.weekdays;
+      const exists = list.includes(day);
+      const nextWeekdays = exists ? list.filter((item) => item !== day) : [...list, day];
+
+      return {
+        ...prev,
+        reminders: {
+          ...prev.reminders,
+          config: {
+            ...prev.reminders.config,
+            weekdays: nextWeekdays,
+          },
+        },
+      };
+    });
+  };
+
+  const switchEditReminderMode = (mode: 'fixed' | 'random') => {
+    setEditTaskDraft((prev) => ({
+      ...prev,
+      reminders: {
+        ...prev.reminders,
+        config:
+          mode === 'fixed'
+            ? {
+                mode: 'fixed',
+                weekdays: prev.reminders.config.weekdays,
+                times: prev.reminders.config.mode === 'fixed' ? prev.reminders.config.times : [],
+              }
+            : {
+                mode: 'random',
+                weekdays: prev.reminders.config.weekdays,
+                startHour: prev.reminders.config.mode === 'random' ? prev.reminders.config.startHour : 9,
+                endHour: prev.reminders.config.mode === 'random' ? prev.reminders.config.endHour : 21,
+                timesInWindow: prev.reminders.config.mode === 'random' ? prev.reminders.config.timesInWindow : 3,
+              },
+      },
+    }));
+  };
+
+  const addEditFixedTime = () => {
+    const normalized = normalizeTimeValue(editFixedTimeInput);
+    if (!normalized) {
+      Alert.alert('Некорректное время', 'Введите время в формате ЧЧ:ММ, например 09:30.');
+      return;
+    }
+
+    setEditTaskDraft((prev) => {
+      if (prev.reminders.config.mode !== 'fixed') {
+        return prev;
+      }
+
+      if (prev.reminders.config.times.includes(normalized)) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        reminders: {
+          ...prev.reminders,
+          config: {
+            ...prev.reminders.config,
+            times: [...prev.reminders.config.times, normalized].sort(),
+          },
+        },
+      };
+    });
+    setEditFixedTimeInput('');
+  };
+
+  const removeEditFixedTime = (time: string) => {
+    setEditTaskDraft((prev) => {
+      if (prev.reminders.config.mode !== 'fixed') {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        reminders: {
+          ...prev.reminders,
+          config: {
+            ...prev.reminders.config,
+            times: prev.reminders.config.times.filter((item) => item !== time),
+          },
+        },
+      };
+    });
+  };
+
   const canProceedTaskStep = useMemo(() => {
     if (taskWizardStep === 1) {
       return taskDraft.title.trim().length > 0;
@@ -745,20 +866,7 @@ export default function App() {
       return taskDraft.motivation.trim().length > 0;
     }
 
-    if (!taskDraft.reminders.enabled) {
-      return true;
-    }
-
-    const weekdaysSelected = taskDraft.reminders.config.weekdays.length > 0;
-    if (!weekdaysSelected) {
-      return false;
-    }
-
-    if (taskDraft.reminders.config.mode === 'fixed') {
-      return taskDraft.reminders.config.times.length > 0;
-    }
-
-    return taskDraft.reminders.config.endHour > taskDraft.reminders.config.startHour;
+    return isTaskReminderValid(taskDraft.reminders);
   }, [taskDraft, taskWizardStep]);
 
   const nextTaskWizardStep = () => {
@@ -778,7 +886,7 @@ export default function App() {
         description: taskDraft.description.trim(),
         motivation: taskDraft.motivation.trim(),
         motivationImageUri: taskDraft.motivationImageUri.trim(),
-        reminders: taskDraft.reminders,
+        reminders: cloneTaskReminders(taskDraft.reminders),
       };
 
       setState((prev) => ({
@@ -797,6 +905,56 @@ export default function App() {
 
   const prevTaskWizardStep = () => {
     setTaskWizardStep((prev) => (prev === 1 ? 1 : ((prev - 1) as TaskWizardStep)));
+  };
+
+  const saveTaskEdit = () => {
+    if (!selectedSettingsBlock || !editingTaskId) {
+      return;
+    }
+
+    const title = editTaskDraft.title.trim();
+    if (!title) {
+      Alert.alert('Нужен заголовок', 'Введите название задачи.');
+      return;
+    }
+
+    const description = editTaskDraft.description.trim();
+    if (!description) {
+      Alert.alert('Нужно описание', 'Опишите, что именно нужно делать.');
+      return;
+    }
+
+    const motivation = editTaskDraft.motivation.trim();
+    if (!motivation) {
+      Alert.alert('Нужна мотивация', 'Добавьте вашу мотивацию для задачи.');
+      return;
+    }
+
+    if (!isTaskReminderValid(editTaskDraft.reminders)) {
+      Alert.alert('Проверьте напоминания', 'Выберите дни недели и корректное время для напоминаний.');
+      return;
+    }
+
+    const nextTask: BlockTask = {
+      id: editingTaskId,
+      title,
+      description,
+      motivation,
+      motivationImageUri: editTaskDraft.motivationImageUri.trim(),
+      reminders: cloneTaskReminders(editTaskDraft.reminders),
+    };
+
+    setState((prev) => ({
+      ...prev,
+      sectionTasks: {
+        ...prev.sectionTasks,
+        [selectedSettingsBlock.id]: (prev.sectionTasks[selectedSettingsBlock.id] ?? []).map((task) =>
+          task.id === editingTaskId ? nextTask : task,
+        ),
+      },
+    }));
+
+    closeTaskEditor();
   };
 
   const openPaywall = () => selectMenuItem('premium');
@@ -929,24 +1087,26 @@ export default function App() {
     </>
   );
 
-  const renderTaskCards = () => (
-    <SectionCard title="Задачи блока" subtitle="Ниже отображаются созданные вами задачи">
-      {selectedBlockTasks.length === 0 ? (
-        <Text style={styles.helper}>Пока нет задач. Нажмите кнопку выше, чтобы добавить первую.</Text>
-      ) : (
-        selectedBlockTasks.map((task) => (
-          <View key={task.id} style={styles.taskCard}>
+  const renderTaskCards = () => {
+    if (selectedBlockTasks.length === 0) {
+      return <Text style={styles.helper}>Пока нет задач. Нажмите кнопку выше, чтобы добавить первую.</Text>;
+    }
+
+    return (
+      <View style={styles.taskList}>
+        {selectedBlockTasks.map((task) => (
+          <Pressable key={task.id} style={styles.taskCard} onPress={() => openTaskEditor(task)}>
             <Text style={styles.taskCardTitle}>{task.title}</Text>
             <Text style={styles.taskCardText}>{task.description}</Text>
             <Text style={styles.taskCardLabel}>Мотивация</Text>
             <Text style={styles.taskCardText}>{task.motivation}</Text>
             {task.motivationImageUri ? <Image source={{ uri: task.motivationImageUri }} style={styles.taskImage} /> : null}
             <Text style={styles.taskReminderText}>{taskReminderSummary(task.reminders)}</Text>
-          </View>
-        ))
-      )}
-    </SectionCard>
-  );
+          </Pressable>
+        ))}
+      </View>
+    );
+  };
 
   const renderSettingsSection = () => {
     if (!selectedSettingsBlock) {
@@ -964,16 +1124,6 @@ export default function App() {
         <Pressable style={styles.blockTopAddBtn} onPress={openTaskWizard}>
           <Text style={styles.blockTopAddBtnText}>+ Добавить задачу</Text>
         </Pressable>
-
-        <SectionCard title="Заметки" subtitle={sectionSubtitle(selectedSettingsBlock.kind)}>
-          <TextInput
-            style={[styles.input, styles.noteInput]}
-            placeholder={sectionPlaceholder(selectedSettingsBlock.kind)}
-            value={state.sectionNotes[selectedSettingsBlock.id] ?? ''}
-            onChangeText={(text) => upsertNote(selectedSettingsBlock.id, text)}
-            multiline
-          />
-        </SectionCard>
 
         {renderTaskCards()}
       </>
@@ -1554,6 +1704,344 @@ export default function App() {
         </View>
       </Modal>
 
+      <Modal visible={isTaskEditModalVisible} transparent animationType="fade" onRequestClose={closeTaskEditor}>
+        <View style={styles.modalBackdrop}>
+          <Pressable style={styles.modalDismissLayer} onPress={closeTaskEditor} />
+          <View style={[styles.modalCard, styles.taskEditModalCard]}>
+            <Text style={styles.modalTitle}>Редактирование задачи</Text>
+
+            <ScrollView style={styles.taskEditScroll} contentContainerStyle={styles.taskEditContent}>
+              <Text style={styles.modalSectionLabel}>Название</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={editTaskDraft.title}
+                onChangeText={(title) => setEditTaskDraft((prev) => ({ ...prev, title }))}
+                placeholder="Введите название задачи"
+              />
+
+              {selectedBlockTitleSuggestions.length > 0 ? (
+                <View style={styles.suggestionsWrap}>
+                  {selectedBlockTitleSuggestions.map((item) => (
+                    <Pressable
+                      key={`edit-${item}`}
+                      style={styles.suggestionChip}
+                      onPress={() => setEditTaskDraft((prev) => ({ ...prev, title: item }))}
+                    >
+                      <Text style={styles.suggestionChipText}>{item}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              ) : null}
+
+              <Text style={styles.modalSectionLabel}>Описание</Text>
+              <TextInput
+                style={[styles.modalInput, styles.modalTextarea]}
+                value={editTaskDraft.description}
+                onChangeText={(description) => setEditTaskDraft((prev) => ({ ...prev, description }))}
+                placeholder="Опишите, что именно и как вы хотите делать по этой задаче"
+                multiline
+              />
+
+              <Text style={styles.modalSectionLabel}>Мотивация</Text>
+              <TextInput
+                style={[styles.modalInput, styles.modalTextarea]}
+                value={editTaskDraft.motivation}
+                onChangeText={(motivation) => setEditTaskDraft((prev) => ({ ...prev, motivation }))}
+                placeholder="Укажите вашу мотивацию - ради чего или кого вы меняетесь"
+                multiline
+              />
+              <Pressable
+                style={styles.modalActionBtn}
+                onPress={() => {
+                  setEditImageUriInput(editTaskDraft.motivationImageUri);
+                  setIsEditImageUriModalVisible(true);
+                }}
+              >
+                <Text style={styles.modalActionText}>Загрузить</Text>
+              </Pressable>
+              <Text style={styles.modalHint}>Сюда можно загрузить фотографию, которая вас будет мотивировать.</Text>
+              {editTaskDraft.motivationImageUri ? (
+                <Image source={{ uri: editTaskDraft.motivationImageUri }} style={styles.taskImagePreview} />
+              ) : null}
+
+              <View style={styles.rowBetween}>
+                <Text style={styles.label}>Включить напоминания</Text>
+                <Switch
+                  value={editTaskDraft.reminders.enabled}
+                  onValueChange={(enabled) =>
+                    setEditTaskDraft((prev) => ({
+                      ...prev,
+                      reminders: {
+                        ...prev.reminders,
+                        enabled,
+                      },
+                    }))
+                  }
+                />
+              </View>
+
+              {editTaskDraft.reminders.enabled ? (
+                <>
+                  <View style={styles.modeRow}>
+                    <Pressable
+                      style={[
+                        styles.modeChip,
+                        editTaskDraft.reminders.config.mode === 'fixed' ? styles.modeChipActive : null,
+                      ]}
+                      onPress={() => switchEditReminderMode('fixed')}
+                    >
+                      <Text
+                        style={[
+                          styles.modeChipText,
+                          editTaskDraft.reminders.config.mode === 'fixed' ? styles.modeChipTextActive : null,
+                        ]}
+                      >
+                        Фиксированное время
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      style={[
+                        styles.modeChip,
+                        editTaskDraft.reminders.config.mode === 'random' ? styles.modeChipActive : null,
+                      ]}
+                      onPress={() => switchEditReminderMode('random')}
+                    >
+                      <Text
+                        style={[
+                          styles.modeChipText,
+                          editTaskDraft.reminders.config.mode === 'random' ? styles.modeChipTextActive : null,
+                        ]}
+                      >
+                        Случайно в промежутке
+                      </Text>
+                    </Pressable>
+                  </View>
+
+                  <Text style={styles.modalSectionLabel}>Дни недели</Text>
+                  <View style={styles.weekdayRow}>
+                    {WEEKDAY_OPTIONS.map((day) => {
+                      const selected = editTaskDraft.reminders.config.weekdays.includes(day.id);
+                      return (
+                        <Pressable
+                          key={`edit-day-${day.id}`}
+                          style={[styles.weekdayChip, selected ? styles.weekdayChipActive : null]}
+                          onPress={() => toggleEditReminderWeekday(day.id)}
+                        >
+                          <Text style={[styles.weekdayChipText, selected ? styles.weekdayChipTextActive : null]}>
+                            {day.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+
+                  {editTaskDraft.reminders.config.mode === 'fixed' ? (
+                    <>
+                      <Text style={styles.modalSectionLabel}>Точное время (можно добавить несколько)</Text>
+                      <View style={styles.timeInputRow}>
+                        <TextInput
+                          style={[styles.modalInput, styles.timeInput]}
+                          value={editFixedTimeInput}
+                          onChangeText={setEditFixedTimeInput}
+                          placeholder="Например 09:30"
+                        />
+                        <Pressable style={styles.timeAddBtn} onPress={addEditFixedTime}>
+                          <Text style={styles.timeAddBtnText}>Добавить</Text>
+                        </Pressable>
+                      </View>
+                      <View style={styles.suggestionsWrap}>
+                        {editTaskDraft.reminders.config.times.map((time) => (
+                          <Pressable
+                            key={`edit-time-${time}`}
+                            style={styles.suggestionChip}
+                            onPress={() => removeEditFixedTime(time)}
+                          >
+                            <Text style={styles.suggestionChipText}>{time} ×</Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    </>
+                  ) : (
+                    <>
+                      <Text style={styles.modalSectionLabel}>Временное окно</Text>
+                      <View style={styles.rowBetween}>
+                        <Text style={styles.label}>С</Text>
+                        <View style={styles.counterRow}>
+                          <Pressable
+                            style={styles.counterBtn}
+                            onPress={() =>
+                              setEditTaskDraft((prev) => {
+                                if (prev.reminders.config.mode !== 'random') {
+                                  return prev;
+                                }
+                                const startHour = clamp(prev.reminders.config.startHour - 1, 0, 22);
+                                const endHour = Math.max(prev.reminders.config.endHour, startHour + 1);
+                                return {
+                                  ...prev,
+                                  reminders: {
+                                    ...prev.reminders,
+                                    config: { ...prev.reminders.config, startHour, endHour },
+                                  },
+                                };
+                              })
+                            }
+                          >
+                            <Text style={styles.counterBtnText}>-</Text>
+                          </Pressable>
+                          <Text style={styles.counterValue}>
+                            {editTaskDraft.reminders.config.mode === 'random'
+                              ? `${String(editTaskDraft.reminders.config.startHour).padStart(2, '0')}:00`
+                              : '--:--'}
+                          </Text>
+                          <Pressable
+                            style={styles.counterBtn}
+                            onPress={() =>
+                              setEditTaskDraft((prev) => {
+                                if (prev.reminders.config.mode !== 'random') {
+                                  return prev;
+                                }
+                                const startHour = clamp(prev.reminders.config.startHour + 1, 0, 22);
+                                const endHour = Math.max(prev.reminders.config.endHour, startHour + 1);
+                                return {
+                                  ...prev,
+                                  reminders: {
+                                    ...prev.reminders,
+                                    config: { ...prev.reminders.config, startHour, endHour },
+                                  },
+                                };
+                              })
+                            }
+                          >
+                            <Text style={styles.counterBtnText}>+</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+
+                      <View style={styles.rowBetween}>
+                        <Text style={styles.label}>До</Text>
+                        <View style={styles.counterRow}>
+                          <Pressable
+                            style={styles.counterBtn}
+                            onPress={() =>
+                              setEditTaskDraft((prev) => {
+                                if (prev.reminders.config.mode !== 'random') {
+                                  return prev;
+                                }
+                                const endHour = clamp(prev.reminders.config.endHour - 1, 1, 23);
+                                const startHour = Math.min(prev.reminders.config.startHour, endHour - 1);
+                                return {
+                                  ...prev,
+                                  reminders: {
+                                    ...prev.reminders,
+                                    config: { ...prev.reminders.config, startHour, endHour },
+                                  },
+                                };
+                              })
+                            }
+                          >
+                            <Text style={styles.counterBtnText}>-</Text>
+                          </Pressable>
+                          <Text style={styles.counterValue}>
+                            {editTaskDraft.reminders.config.mode === 'random'
+                              ? `${String(editTaskDraft.reminders.config.endHour).padStart(2, '0')}:00`
+                              : '--:--'}
+                          </Text>
+                          <Pressable
+                            style={styles.counterBtn}
+                            onPress={() =>
+                              setEditTaskDraft((prev) => {
+                                if (prev.reminders.config.mode !== 'random') {
+                                  return prev;
+                                }
+                                const endHour = clamp(prev.reminders.config.endHour + 1, 1, 23);
+                                const startHour = Math.min(prev.reminders.config.startHour, endHour - 1);
+                                return {
+                                  ...prev,
+                                  reminders: {
+                                    ...prev.reminders,
+                                    config: { ...prev.reminders.config, startHour, endHour },
+                                  },
+                                };
+                              })
+                            }
+                          >
+                            <Text style={styles.counterBtnText}>+</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+
+                      <View style={styles.rowBetween}>
+                        <Text style={styles.label}>Раз в окне</Text>
+                        <View style={styles.counterRow}>
+                          <Pressable
+                            style={styles.counterBtn}
+                            onPress={() =>
+                              setEditTaskDraft((prev) => {
+                                if (prev.reminders.config.mode !== 'random') {
+                                  return prev;
+                                }
+                                return {
+                                  ...prev,
+                                  reminders: {
+                                    ...prev.reminders,
+                                    config: {
+                                      ...prev.reminders.config,
+                                      timesInWindow: Math.max(1, prev.reminders.config.timesInWindow - 1),
+                                    },
+                                  },
+                                };
+                              })
+                            }
+                          >
+                            <Text style={styles.counterBtnText}>-</Text>
+                          </Pressable>
+                          <Text style={styles.counterValue}>
+                            {editTaskDraft.reminders.config.mode === 'random'
+                              ? editTaskDraft.reminders.config.timesInWindow
+                              : 0}
+                          </Text>
+                          <Pressable
+                            style={styles.counterBtn}
+                            onPress={() =>
+                              setEditTaskDraft((prev) => {
+                                if (prev.reminders.config.mode !== 'random') {
+                                  return prev;
+                                }
+                                return {
+                                  ...prev,
+                                  reminders: {
+                                    ...prev.reminders,
+                                    config: {
+                                      ...prev.reminders.config,
+                                      timesInWindow: Math.min(12, prev.reminders.config.timesInWindow + 1),
+                                    },
+                                  },
+                                };
+                              })
+                            }
+                          >
+                            <Text style={styles.counterBtnText}>+</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    </>
+                  )}
+                </>
+              ) : null}
+            </ScrollView>
+
+            <View style={styles.modalActionsRow}>
+              <Pressable style={styles.modalCancelBtnSmall} onPress={closeTaskEditor}>
+                <Text style={styles.modalCancelText}>Отмена</Text>
+              </Pressable>
+              <Pressable style={styles.modalConfirmBtn} onPress={saveTaskEdit}>
+                <Text style={styles.modalConfirmText}>Сохранить</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <Modal
         visible={isImageUriModalVisible}
         transparent
@@ -1580,6 +2068,41 @@ export default function App() {
                 onPress={() => {
                   setTaskDraft((prev) => ({ ...prev, motivationImageUri: imageUriInput.trim() }));
                   setIsImageUriModalVisible(false);
+                }}
+              >
+                <Text style={styles.modalConfirmText}>Сохранить</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={isEditImageUriModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsEditImageUriModalVisible(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <Pressable style={styles.modalDismissLayer} onPress={() => setIsEditImageUriModalVisible(false)} />
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Изображение мотивации</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={editImageUriInput}
+              onChangeText={setEditImageUriInput}
+              placeholder="Вставьте ссылку или локальный путь к фото"
+            />
+            <Text style={styles.modalHint}>После сохранения фото будет отображаться в задаче.</Text>
+            <View style={styles.modalActionsRow}>
+              <Pressable style={styles.modalCancelBtnSmall} onPress={() => setIsEditImageUriModalVisible(false)}>
+                <Text style={styles.modalCancelText}>Отмена</Text>
+              </Pressable>
+              <Pressable
+                style={styles.modalConfirmBtn}
+                onPress={() => {
+                  setEditTaskDraft((prev) => ({ ...prev, motivationImageUri: editImageUriInput.trim() }));
+                  setIsEditImageUriModalVisible(false);
                 }}
               >
                 <Text style={styles.modalConfirmText}>Сохранить</Text>
@@ -1878,6 +2401,10 @@ const styles = StyleSheet.create({
     padding: 12,
     gap: 6,
   },
+  taskList: {
+    gap: 10,
+    marginTop: 4,
+  },
   taskCardTitle: {
     color: '#1d356f',
     fontSize: 17,
@@ -1942,10 +2469,6 @@ const styles = StyleSheet.create({
     color: '#1d2b50',
     backgroundColor: '#fff',
     marginBottom: 8,
-  },
-  noteInput: {
-    minHeight: 90,
-    textAlignVertical: 'top',
   },
   counterRow: {
     flexDirection: 'row',
@@ -2027,6 +2550,9 @@ const styles = StyleSheet.create({
     padding: 14,
     gap: 8,
   },
+  taskEditModalCard: {
+    maxHeight: '88%',
+  },
   modalTitle: {
     fontSize: 18,
     fontWeight: '700',
@@ -2090,6 +2616,13 @@ const styles = StyleSheet.create({
     color: '#5f6f96',
     fontSize: 12,
     lineHeight: 18,
+  },
+  taskEditScroll: {
+    maxHeight: 520,
+  },
+  taskEditContent: {
+    gap: 8,
+    paddingBottom: 4,
   },
   taskImagePreview: {
     width: '100%',
