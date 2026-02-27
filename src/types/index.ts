@@ -33,9 +33,20 @@ export interface UserProfile {
   isPremium: boolean;
 }
 
+export type SettingsBlockKind = 'traits' | 'emotions' | 'habits' | 'values' | 'custom';
+
+export interface SettingsBlock {
+  id: string;
+  kind: SettingsBlockKind;
+  title: string;
+  color: string;
+}
+
 export interface AppState {
   goals: UserGoal[];
   reminderSettings: ReminderSettings;
   checkins: DailyCheckin[];
   profile: UserProfile;
+  settingsBlocks: SettingsBlock[];
+  sectionNotes: Record<string, string>;
 }

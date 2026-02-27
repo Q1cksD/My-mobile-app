@@ -1,6 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Animated,
   Alert,
+  Modal,
+  PanResponder,
   Platform,
   Pressable,
   SafeAreaView,
@@ -21,12 +24,25 @@ import { HistoryRange, HistoryScreen } from './screens/HistoryScreen';
 import { HomeScreen } from './screens/HomeScreen';
 import { PremiumScreen } from './screens/PremiumScreen';
 import { ProfileMenuScreen } from './screens/ProfileMenuScreen';
-import { AppState, DailyCheckin, GoalCategory, UserGoal } from './types';
+import { AppState, DailyCheckin, GoalCategory, SettingsBlock, SettingsBlockKind, UserGoal } from './types';
 import { lastNDays, todayKey } from './utils/date';
 import { defaultState, loadState, saveState } from './utils/storage';
 
 type TabKey = 'home' | 'history' | 'settings' | 'premium' | 'profile';
-type SettingsSection = 'traits' | 'emotions' | 'habits' | 'values' | null;
+type SettingsSection = string | null;
+type TemplateBlockKind = Extract<SettingsBlockKind, 'traits' | 'emotions' | 'habits' | 'values'>;
+
+const BASE_SETTINGS_BLOCKS: { kind: TemplateBlockKind; title: string; color: string }[] = [
+  { kind: 'traits', title: 'Черты характера', color: '#eef4ff' },
+  { kind: 'emotions', title: 'Эмоции', color: '#eefaf5' },
+  { kind: 'habits', title: 'Привычки', color: '#fff8eb' },
+  { kind: 'values', title: 'Ценности и убеждения', color: '#f5f0ff' },
+];
+
+const CUSTOM_BLOCK_COLORS = ['#f0f6ff', '#fff6ef', '#effaf2', '#fff0f6', '#f7f3ff'];
+const SETTINGS_CARD_HEIGHT = 96;
+const SETTINGS_CARD_GAP = 12;
+const SETTINGS_CARD_STEP = SETTINGS_CARD_HEIGHT + SETTINGS_CARD_GAP;
 
 function createGoal(category: GoalCategory): UserGoal {
   const template = GOAL_TEMPLATES.find((item) => item.id === category);
@@ -46,6 +62,46 @@ function hourLabel(hour: number): string {
   return `${String(hour).padStart(2, '0')}:00`;
 }
 
+function moveItem<T>(items: T[], from: number, to: number): T[] {
+  const next = [...items];
+  const [moved] = next.splice(from, 1);
+  if (!moved) {
+    return items;
+  }
+
+  next.splice(to, 0, moved);
+  return next;
+}
+
+function sectionSubtitle(kind: SettingsBlockKind): string | undefined {
+  if (kind === 'emotions') {
+    return 'Что вы хотите контролировать в течение недели';
+  }
+  if (kind === 'habits') {
+    return 'Опишите привычку, которую хотите добавить';
+  }
+  if (kind === 'values') {
+    return 'Сформулируйте личные принципы';
+  }
+  if (kind === 'custom') {
+    return 'Свободный блок заметок';
+  }
+  return undefined;
+}
+
+function sectionPlaceholder(kind: SettingsBlockKind): string {
+  if (kind === 'emotions') {
+    return 'Например: делать паузу и 3 глубоких вдоха перед ответом';
+  }
+  if (kind === 'habits') {
+    return 'Например: 20 минут чтения каждый день';
+  }
+  if (kind === 'values') {
+    return 'Например: быть последовательным и уважительным в общении';
+  }
+  return 'Введите описание или заметку';
+}
+
 export default function App() {
   const [state, setState] = useState<AppState>(defaultState);
   const [loaded, setLoaded] = useState(false);
@@ -55,9 +111,21 @@ export default function App() {
   const [historyRange, setHistoryRange] = useState<HistoryRange>(7);
   const [checkinScore, setCheckinScore] = useState<number | null>(null);
   const [checkinNote, setCheckinNote] = useState('');
-  const [emotionPlan, setEmotionPlan] = useState('');
-  const [habitPlan, setHabitPlan] = useState('');
-  const [valuesPlan, setValuesPlan] = useState('');
+  const [activeMenuBlockId, setActiveMenuBlockId] = useState<string | null>(null);
+  const [renameBlockId, setRenameBlockId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [isAddModalVisible, setIsAddModalVisible] = useState(false);
+  const [isNewBlockModalVisible, setIsNewBlockModalVisible] = useState(false);
+  const [newBlockName, setNewBlockName] = useState('');
+  const [isReorderMode, setIsReorderMode] = useState(false);
+  const [draftBlocks, setDraftBlocks] = useState<SettingsBlock[]>([]);
+  const [draggingBlockId, setDraggingBlockId] = useState<string | null>(null);
+  const [dragOriginIndex, setDragOriginIndex] = useState(0);
+  const dragY = useRef(new Animated.Value(0)).current;
+  const draggingBlockRef = useRef<string | null>(null);
+  const dragBaseBlocksRef = useRef<SettingsBlock[]>([]);
+  const dragOriginIndexRef = useRef(0);
+  const dragTargetIndexRef = useRef(0);
   const { setupNotifications } = useNotifications();
 
   const androidTopInset = Platform.OS === 'android' ? (RNStatusBar.currentHeight ?? 0) : 0;
@@ -84,6 +152,26 @@ export default function App() {
   const todayCheckin = state.checkins.find((item) => item.date === today);
   const activeGoalsList = useMemo(() => state.goals.filter((goal) => goal.isActive), [state.goals]);
   const activeGoals = activeGoalsList.length;
+  const visibleSettingsBlocks = isReorderMode ? draftBlocks : state.settingsBlocks;
+  const selectedSettingsBlock = useMemo(
+    () => state.settingsBlocks.find((block) => block.id === settingsSection) ?? null,
+    [settingsSection, state.settingsBlocks],
+  );
+  const activeMenuBlock = useMemo(
+    () => state.settingsBlocks.find((block) => block.id === activeMenuBlockId) ?? null,
+    [activeMenuBlockId, state.settingsBlocks],
+  );
+  const missingTemplateBlocks = useMemo(
+    () =>
+      BASE_SETTINGS_BLOCKS.filter(
+        (template) => !state.settingsBlocks.some((block) => block.kind === template.kind),
+      ),
+    [state.settingsBlocks],
+  );
+  const draggingBlock = useMemo(
+    () => visibleSettingsBlocks.find((block) => block.id === draggingBlockId) ?? null,
+    [draggingBlockId, visibleSettingsBlocks],
+  );
 
   useEffect(() => {
     if (!loaded) {
@@ -97,6 +185,16 @@ export default function App() {
     setCheckinScore(todayCheckin?.score ?? null);
     setCheckinNote(todayCheckin?.note ?? '');
   }, [todayCheckin]);
+
+  useEffect(() => {
+    draggingBlockRef.current = draggingBlockId;
+  }, [draggingBlockId]);
+
+  useEffect(() => {
+    if (settingsSection && !state.settingsBlocks.some((block) => block.id === settingsSection)) {
+      setSettingsSection(null);
+    }
+  }, [settingsSection, state.settingsBlocks]);
 
   const weeklySuccess = useMemo(() => {
     const week = new Set(lastNDays(7));
@@ -117,6 +215,53 @@ export default function App() {
 
     return { records, average, strongDays, completion };
   }, [historyRange, state.checkins]);
+
+  const finishDrag = useCallback(() => {
+    if (!draggingBlockRef.current) {
+      return;
+    }
+
+    const finalBlocks = moveItem(
+      dragBaseBlocksRef.current,
+      dragOriginIndexRef.current,
+      dragTargetIndexRef.current,
+    );
+    dragBaseBlocksRef.current = finalBlocks;
+    setDraftBlocks(finalBlocks);
+    setDraggingBlockId(null);
+    draggingBlockRef.current = null;
+    dragY.setValue(0);
+  }, [dragY]);
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => Boolean(draggingBlockRef.current),
+        onMoveShouldSetPanResponder: () => Boolean(draggingBlockRef.current),
+        onPanResponderMove: (_, gestureState) => {
+          if (!draggingBlockRef.current || dragBaseBlocksRef.current.length <= 1) {
+            return;
+          }
+
+          dragY.setValue(gestureState.dy);
+          const nextIndex = clamp(
+            dragOriginIndexRef.current + Math.round(gestureState.dy / SETTINGS_CARD_STEP),
+            0,
+            dragBaseBlocksRef.current.length - 1,
+          );
+
+          if (nextIndex === dragTargetIndexRef.current) {
+            return;
+          }
+
+          dragTargetIndexRef.current = nextIndex;
+          setDraftBlocks(moveItem(dragBaseBlocksRef.current, dragOriginIndexRef.current, nextIndex));
+        },
+        onPanResponderRelease: finishDrag,
+        onPanResponderTerminate: finishDrag,
+      }),
+    [dragY, finishDrag],
+  );
 
   const toggleGoal = (category: GoalCategory) => {
     setState((prev) => {
@@ -194,7 +339,171 @@ export default function App() {
     setActiveTab(tab);
     if (tab === 'settings') {
       setSettingsSection(null);
+      return;
     }
+
+    setIsReorderMode(false);
+    setDraftBlocks([]);
+    setDraggingBlockId(null);
+    draggingBlockRef.current = null;
+    dragY.setValue(0);
+  };
+
+  const upsertNote = (key: string, note: string) => {
+    setState((prev) => ({
+      ...prev,
+      sectionNotes: {
+        ...prev.sectionNotes,
+        [key]: note,
+      },
+    }));
+  };
+
+  const openBlock = (blockId: string) => {
+    if (isReorderMode) {
+      return;
+    }
+    setSettingsSection(blockId);
+  };
+
+  const startReorderForBlock = (blockId: string) => {
+    const source = isReorderMode ? draftBlocks : state.settingsBlocks;
+    const startIndex = source.findIndex((block) => block.id === blockId);
+    if (startIndex === -1) {
+      return;
+    }
+
+    if (!isReorderMode) {
+      setIsReorderMode(true);
+      setDraftBlocks(source);
+    }
+
+    dragBaseBlocksRef.current = source;
+    dragOriginIndexRef.current = startIndex;
+    dragTargetIndexRef.current = startIndex;
+    setDragOriginIndex(startIndex);
+    setDraggingBlockId(blockId);
+    draggingBlockRef.current = blockId;
+    dragY.setValue(0);
+  };
+
+  const applyReorder = () => {
+    if (!isReorderMode) {
+      return;
+    }
+
+    if (draggingBlockRef.current) {
+      finishDrag();
+    }
+
+    setState((prev) => ({
+      ...prev,
+      settingsBlocks: draftBlocks.length ? draftBlocks : prev.settingsBlocks,
+    }));
+    setIsReorderMode(false);
+    setDraftBlocks([]);
+    setDraggingBlockId(null);
+    draggingBlockRef.current = null;
+    dragY.setValue(0);
+  };
+
+  const openRename = () => {
+    if (!activeMenuBlock) {
+      return;
+    }
+    setRenameBlockId(activeMenuBlock.id);
+    setRenameValue(activeMenuBlock.title);
+    setActiveMenuBlockId(null);
+  };
+
+  const applyRename = () => {
+    if (!renameBlockId) {
+      return;
+    }
+
+    const title = renameValue.trim();
+    if (!title) {
+      Alert.alert('Нужен заголовок', 'Введите название блока.');
+      return;
+    }
+
+    setState((prev) => ({
+      ...prev,
+      settingsBlocks: prev.settingsBlocks.map((block) =>
+        block.id === renameBlockId ? { ...block, title } : block,
+      ),
+    }));
+    setRenameBlockId(null);
+    setRenameValue('');
+  };
+
+  const deleteBlock = (blockId: string) => {
+    setState((prev) => {
+      const nextNotes = { ...prev.sectionNotes };
+      delete nextNotes[blockId];
+
+      return {
+        ...prev,
+        settingsBlocks: prev.settingsBlocks.filter((block) => block.id !== blockId),
+        sectionNotes: nextNotes,
+      };
+    });
+
+    setActiveMenuBlockId(null);
+    if (settingsSection === blockId) {
+      setSettingsSection(null);
+    }
+  };
+
+  const addTemplateBlock = (kind: TemplateBlockKind) => {
+    const template = BASE_SETTINGS_BLOCKS.find((item) => item.kind === kind);
+    if (!template) {
+      return;
+    }
+
+    setState((prev) => ({
+      ...prev,
+      settingsBlocks: [
+        ...prev.settingsBlocks,
+        {
+          id: template.kind,
+          kind: template.kind,
+          title: template.title,
+          color: template.color,
+        },
+      ],
+      sectionNotes: {
+        ...prev.sectionNotes,
+        [template.kind]: prev.sectionNotes[template.kind] ?? '',
+      },
+    }));
+    setIsAddModalVisible(false);
+  };
+
+  const addCustomBlock = () => {
+    const title = newBlockName.trim();
+    if (!title) {
+      Alert.alert('Нужен заголовок', 'Введите название нового блока.');
+      return;
+    }
+
+    setState((prev) => {
+      const customCount = prev.settingsBlocks.filter((block) => block.kind === 'custom').length;
+      const color = CUSTOM_BLOCK_COLORS[customCount % CUSTOM_BLOCK_COLORS.length] ?? '#f0f6ff';
+      const id = `custom-${Date.now()}`;
+
+      return {
+        ...prev,
+        settingsBlocks: [...prev.settingsBlocks, { id, kind: 'custom', title, color }],
+        sectionNotes: {
+          ...prev.sectionNotes,
+          [id]: '',
+        },
+      };
+    });
+
+    setNewBlockName('');
+    setIsNewBlockModalVisible(false);
   };
 
   const openPaywall = () => selectMenuItem('premium');
@@ -328,66 +637,32 @@ export default function App() {
   );
 
   const renderSettingsSection = () => {
-    if (settingsSection === 'traits') {
+    if (!selectedSettingsBlock) {
+      return null;
+    }
+
+    if (selectedSettingsBlock.kind === 'traits') {
       return (
         <>
           <Pressable style={styles.backBtn} onPress={() => setSettingsSection(null)}>
-            <Text style={styles.backBtnText}>{'< Назад'}</Text>
+            <Text style={styles.backBtnText}>{'< �����'}</Text>
           </Pressable>
           {renderTraitsSettings()}
         </>
       );
     }
 
-    if (settingsSection === 'emotions') {
-      return (
-        <>
-          <Pressable style={styles.backBtn} onPress={() => setSettingsSection(null)}>
-            <Text style={styles.backBtnText}>{'< Назад'}</Text>
-          </Pressable>
-          <SectionCard title="Эмоции" subtitle="Что вы хотите контролировать в течение недели">
-            <TextInput
-              style={[styles.input, styles.noteInput]}
-              placeholder="Например: делать паузу и 3 глубоких вдоха перед ответом"
-              value={emotionPlan}
-              onChangeText={setEmotionPlan}
-              multiline
-            />
-          </SectionCard>
-        </>
-      );
-    }
-
-    if (settingsSection === 'habits') {
-      return (
-        <>
-          <Pressable style={styles.backBtn} onPress={() => setSettingsSection(null)}>
-            <Text style={styles.backBtnText}>{'< Назад'}</Text>
-          </Pressable>
-          <SectionCard title="Привычки" subtitle="Опишите привычку, которую хотите добавить">
-            <TextInput
-              style={[styles.input, styles.noteInput]}
-              placeholder="Например: 20 минут чтения каждый день"
-              value={habitPlan}
-              onChangeText={setHabitPlan}
-              multiline
-            />
-          </SectionCard>
-        </>
-      );
-    }
-
-  return (
+    return (
       <>
         <Pressable style={styles.backBtn} onPress={() => setSettingsSection(null)}>
-          <Text style={styles.backBtnText}>{'< Назад'}</Text>
+          <Text style={styles.backBtnText}>{'< �����'}</Text>
         </Pressable>
-        <SectionCard title="Ценности и убеждения" subtitle="Сформулируйте личные принципы">
+        <SectionCard title={selectedSettingsBlock.title} subtitle={sectionSubtitle(selectedSettingsBlock.kind)}>
           <TextInput
             style={[styles.input, styles.noteInput]}
-            placeholder="Например: быть последовательным и уважительным в общении"
-            value={valuesPlan}
-            onChangeText={setValuesPlan}
+            placeholder={sectionPlaceholder(selectedSettingsBlock.kind)}
+            value={state.sectionNotes[selectedSettingsBlock.id] ?? ''}
+            onChangeText={(text) => upsertNote(selectedSettingsBlock.id, text)}
             multiline
           />
         </SectionCard>
@@ -396,22 +671,72 @@ export default function App() {
   };
 
   const renderSettingsHome = () => (
-    <View style={styles.settingsGrid}>
-      <Pressable style={[styles.settingsCardBtn, styles.settingsCardTraits]} onPress={() => setSettingsSection('traits')}>
-        <Text style={styles.settingsCardText}>Черты характера</Text>
-      </Pressable>
-      <Pressable
-        style={[styles.settingsCardBtn, styles.settingsCardEmotions]}
-        onPress={() => setSettingsSection('emotions')}
-      >
-        <Text style={styles.settingsCardText}>Эмоции</Text>
-      </Pressable>
-      <Pressable style={[styles.settingsCardBtn, styles.settingsCardHabits]} onPress={() => setSettingsSection('habits')}>
-        <Text style={styles.settingsCardText}>Привычки</Text>
-      </Pressable>
-      <Pressable style={[styles.settingsCardBtn, styles.settingsCardValues]} onPress={() => setSettingsSection('values')}>
-        <Text style={styles.settingsCardText}>Ценности и убеждения</Text>
-      </Pressable>
+    <View style={styles.settingsGridWrap}>
+      {isReorderMode ? <Text style={styles.reorderHint}>���������� ����� � ������� ✓, ����� ���������</Text> : null}
+      <View style={styles.settingsGrid}>
+        {visibleSettingsBlocks.map((block) => {
+          const isDragging = draggingBlockId === block.id;
+          return (
+            <Pressable
+              key={block.id}
+              style={[
+                styles.settingsCardBtn,
+                { backgroundColor: block.color },
+                isReorderMode ? styles.settingsCardReorder : null,
+                isDragging ? styles.settingsCardGhost : null,
+              ]}
+              onPress={() => openBlock(block.id)}
+              onLongPress={() => startReorderForBlock(block.id)}
+              delayLongPress={180}
+              disabled={Boolean(draggingBlockId) && !isDragging}
+            >
+              <Text style={styles.settingsCardText}>{block.title}</Text>
+              {!isReorderMode ? (
+                <Pressable
+                  style={styles.settingsMenuBtn}
+                  onPress={(event) => {
+                    event.stopPropagation();
+                    setActiveMenuBlockId(block.id);
+                  }}
+                >
+                  <Text style={styles.settingsMenuBtnText}>⋮</Text>
+                </Pressable>
+              ) : (
+                <Text style={styles.dragHint}>����������</Text>
+              )}
+            </Pressable>
+          );
+        })}
+
+        {!isReorderMode ? (
+          <Pressable style={[styles.settingsCardBtn, styles.addBlockCard]} onPress={() => setIsAddModalVisible(true)}>
+            <Text style={styles.addBlockPlus}>+</Text>
+          </Pressable>
+        ) : null}
+
+        {isReorderMode && draggingBlock ? (
+          <Animated.View
+            style={[
+              styles.dragOverlay,
+              {
+                top: dragOriginIndex * SETTINGS_CARD_STEP,
+                transform: [{ translateY: dragY }],
+              },
+            ]}
+            {...panResponder.panHandlers}
+          >
+            <View style={[styles.settingsCardBtn, styles.dragOverlayCard, { backgroundColor: draggingBlock.color }]}>
+              <Text style={styles.settingsCardText}>{draggingBlock.title}</Text>
+            </View>
+          </Animated.View>
+        ) : null}
+      </View>
+
+      {isReorderMode ? (
+        <Pressable style={styles.applyReorderBtn} onPress={applyReorder}>
+          <Text style={styles.applyReorderBtnText}>✓</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 
@@ -505,7 +830,7 @@ export default function App() {
       </View>
       <View style={styles.topDivider} />
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView contentContainerStyle={styles.content} scrollEnabled={!(activeTab === 'settings' && isReorderMode)}>
         {activeTab === 'home' ? (
           <HomeScreen
             userName={state.profile.name}
@@ -553,6 +878,110 @@ export default function App() {
           />
         ) : null}
       </ScrollView>
+
+      <Modal visible={Boolean(activeMenuBlock)} transparent animationType="fade" onRequestClose={() => setActiveMenuBlockId(null)}>
+        <View style={styles.modalBackdrop}>
+          <Pressable style={styles.modalDismissLayer} onPress={() => setActiveMenuBlockId(null)} />
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>{activeMenuBlock?.title ?? '����'}</Text>
+            <Pressable style={styles.modalActionBtn} onPress={openRename}>
+              <Text style={styles.modalActionText}>�������������</Text>
+            </Pressable>
+            <Pressable
+              style={styles.modalActionBtn}
+              onPress={() => {
+                if (activeMenuBlock) {
+                  deleteBlock(activeMenuBlock.id);
+                }
+              }}
+            >
+              <Text style={[styles.modalActionText, styles.modalDangerText]}>������� ����</Text>
+            </Pressable>
+            <Pressable style={styles.modalCancelBtn} onPress={() => setActiveMenuBlockId(null)}>
+              <Text style={styles.modalCancelText}>�������</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={Boolean(renameBlockId)} transparent animationType="fade" onRequestClose={() => setRenameBlockId(null)}>
+        <View style={styles.modalBackdrop}>
+          <Pressable style={styles.modalDismissLayer} onPress={() => setRenameBlockId(null)} />
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>�������� �����</Text>
+            <TextInput style={styles.modalInput} value={renameValue} onChangeText={setRenameValue} placeholder="������� ��������" />
+            <View style={styles.modalActionsRow}>
+              <Pressable style={styles.modalCancelBtnSmall} onPress={() => setRenameBlockId(null)}>
+                <Text style={styles.modalCancelText}>������</Text>
+              </Pressable>
+              <Pressable style={styles.modalConfirmBtn} onPress={applyRename}>
+                <Text style={styles.modalConfirmText}>���������</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={isAddModalVisible} transparent animationType="fade" onRequestClose={() => setIsAddModalVisible(false)}>
+        <View style={styles.modalBackdrop}>
+          <Pressable style={styles.modalDismissLayer} onPress={() => setIsAddModalVisible(false)} />
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>���������� �����</Text>
+            <Pressable
+              style={styles.modalActionBtn}
+              onPress={() => {
+                setIsAddModalVisible(false);
+                setNewBlockName('');
+                setIsNewBlockModalVisible(true);
+              }}
+            >
+              <Text style={styles.modalActionText}>�������� ����� ����</Text>
+            </Pressable>
+
+            {missingTemplateBlocks.map((template) => (
+              <Pressable
+                key={template.kind}
+                style={styles.modalActionBtn}
+                onPress={() => addTemplateBlock(template.kind)}
+              >
+                <Text style={styles.modalActionText}>�������� ������: {template.title}</Text>
+              </Pressable>
+            ))}
+
+            <Pressable style={styles.modalCancelBtn} onPress={() => setIsAddModalVisible(false)}>
+              <Text style={styles.modalCancelText}>�������</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={isNewBlockModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsNewBlockModalVisible(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <Pressable style={styles.modalDismissLayer} onPress={() => setIsNewBlockModalVisible(false)} />
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>����� ����</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={newBlockName}
+              onChangeText={setNewBlockName}
+              placeholder="������� ��������"
+            />
+            <View style={styles.modalActionsRow}>
+              <Pressable style={styles.modalCancelBtnSmall} onPress={() => setIsNewBlockModalVisible(false)}>
+                <Text style={styles.modalCancelText}>������</Text>
+              </Pressable>
+              <Pressable style={styles.modalConfirmBtn} onPress={addCustomBlock}>
+                <Text style={styles.modalConfirmText}>��������</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -604,34 +1033,98 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 24,
   },
+  settingsGridWrap: {
+    gap: 8,
+  },
   settingsGrid: {
-    gap: 12,
+    position: 'relative',
+  },
+  reorderHint: {
+    color: '#4b5f8f',
+    marginBottom: 8,
   },
   settingsCardBtn: {
     borderRadius: 16,
-    minHeight: 96,
+    minHeight: SETTINGS_CARD_HEIGHT,
     paddingHorizontal: 16,
     paddingVertical: 14,
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: '#d6e1f8',
-  },
-  settingsCardTraits: {
-    backgroundColor: '#eef4ff',
-  },
-  settingsCardEmotions: {
-    backgroundColor: '#eefaf5',
-  },
-  settingsCardHabits: {
-    backgroundColor: '#fff8eb',
-  },
-  settingsCardValues: {
-    backgroundColor: '#f5f0ff',
+    marginBottom: SETTINGS_CARD_GAP,
+    position: 'relative',
   },
   settingsCardText: {
     color: '#2a3a5f',
     fontSize: 18,
     fontWeight: '700',
+    paddingRight: 44,
+  },
+  settingsCardReorder: {
+    borderStyle: 'dashed',
+  },
+  settingsCardGhost: {
+    opacity: 0.1,
+  },
+  settingsMenuBtn: {
+    position: 'absolute',
+    right: 8,
+    top: 0,
+    bottom: 0,
+    width: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  settingsMenuBtnText: {
+    fontSize: 18,
+    color: '#334e94',
+    fontWeight: '700',
+  },
+  dragHint: {
+    marginTop: 8,
+    color: '#556a98',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  addBlockCard: {
+    alignItems: 'center',
+    borderStyle: 'dashed',
+    borderColor: '#9fb5eb',
+    backgroundColor: '#f9fcff',
+  },
+  addBlockPlus: {
+    fontSize: 34,
+    color: '#3b5fb7',
+    fontWeight: '600',
+  },
+  dragOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    zIndex: 20,
+  },
+  dragOverlayCard: {
+    marginBottom: 0,
+    shadowColor: '#1a2d5d',
+    shadowOpacity: 0.2,
+    shadowOffset: { width: 0, height: 8 },
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  applyReorderBtn: {
+    alignSelf: 'center',
+    minWidth: 76,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: '#2f5ee5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  applyReorderBtnText: {
+    color: '#fff',
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
   backBtn: {
     alignSelf: 'flex-start',
@@ -747,6 +1240,93 @@ const styles = StyleSheet.create({
     backgroundColor: '#4169e1',
   },
   primaryBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(20, 31, 62, 0.34)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  modalDismissLayer: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 380,
+    borderRadius: 14,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#dbe6ff',
+    padding: 14,
+    gap: 8,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#20366f',
+    marginBottom: 2,
+  },
+  modalActionBtn: {
+    borderWidth: 1,
+    borderColor: '#d8e4ff',
+    borderRadius: 10,
+    paddingVertical: 11,
+    paddingHorizontal: 12,
+    backgroundColor: '#f8fbff',
+  },
+  modalActionText: {
+    color: '#33539f',
+    fontWeight: '600',
+  },
+  modalDangerText: {
+    color: '#b43232',
+  },
+  modalCancelBtn: {
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#edf2ff',
+    marginTop: 2,
+  },
+  modalCancelBtnSmall: {
+    flex: 1,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    backgroundColor: '#eef3ff',
+  },
+  modalCancelText: {
+    color: '#4260a8',
+    fontWeight: '600',
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: '#dbe5ff',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: '#1d2b50',
+    backgroundColor: '#fff',
+  },
+  modalActionsRow: {
+    marginTop: 4,
+    flexDirection: 'row',
+    gap: 10,
+  },
+  modalConfirmBtn: {
+    flex: 1,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    backgroundColor: '#2f5ee5',
+  },
+  modalConfirmText: {
     color: '#fff',
     fontWeight: '700',
   },

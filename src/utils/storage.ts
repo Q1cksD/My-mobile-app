@@ -17,6 +17,17 @@ export const defaultState: AppState = {
     onboardingCompleted: false,
     isPremium: false,
   },
+  settingsBlocks: [
+    { id: 'traits', kind: 'traits', title: 'Черты характера', color: '#eef4ff' },
+    { id: 'emotions', kind: 'emotions', title: 'Эмоции', color: '#eefaf5' },
+    { id: 'habits', kind: 'habits', title: 'Привычки', color: '#fff8eb' },
+    { id: 'values', kind: 'values', title: 'Ценности и убеждения', color: '#f5f0ff' },
+  ],
+  sectionNotes: {
+    emotions: '',
+    habits: '',
+    values: '',
+  },
 };
 
 export async function loadState(): Promise<AppState> {
@@ -27,6 +38,9 @@ export async function loadState(): Promise<AppState> {
 
   try {
     const parsed = JSON.parse(raw) as Partial<AppState>;
+    const parsedBlocks =
+      parsed.settingsBlocks && parsed.settingsBlocks.length > 0 ? parsed.settingsBlocks : defaultState.settingsBlocks;
+
     return {
       ...defaultState,
       ...parsed,
@@ -40,6 +54,11 @@ export async function loadState(): Promise<AppState> {
       },
       goals: parsed.goals ?? [],
       checkins: parsed.checkins ?? [],
+      settingsBlocks: parsedBlocks,
+      sectionNotes: {
+        ...defaultState.sectionNotes,
+        ...parsed.sectionNotes,
+      },
     };
   } catch {
     return defaultState;
