@@ -28,6 +28,7 @@ export const defaultState: AppState = {
     habits: '',
     values: '',
   },
+  sectionTasks: {},
 };
 
 export async function loadState(): Promise<AppState> {
@@ -59,6 +60,7 @@ export async function loadState(): Promise<AppState> {
         ...defaultState.sectionNotes,
         ...parsed.sectionNotes,
       },
+      sectionTasks: parsed.sectionTasks ?? {},
     };
   } catch {
     return defaultState;

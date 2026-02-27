@@ -13,6 +13,7 @@ import {
   Switch,
   Text,
   TextInput,
+  Image,
   View,
 } from 'react-native';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
@@ -24,7 +25,17 @@ import { HistoryRange, HistoryScreen } from './screens/HistoryScreen';
 import { HomeScreen } from './screens/HomeScreen';
 import { PremiumScreen } from './screens/PremiumScreen';
 import { ProfileMenuScreen } from './screens/ProfileMenuScreen';
-import { AppState, DailyCheckin, GoalCategory, SettingsBlock, SettingsBlockKind, UserGoal } from './types';
+import {
+  AppState,
+  BlockTask,
+  DailyCheckin,
+  GoalCategory,
+  SettingsBlock,
+  SettingsBlockKind,
+  TaskReminderSettings,
+  UserGoal,
+  WeekdayKey,
+} from './types';
 import { lastNDays, todayKey } from './utils/date';
 import { defaultState, loadState, saveState } from './utils/storage';
 
@@ -43,13 +54,39 @@ const CUSTOM_BLOCK_COLORS = ['#f0f6ff', '#fff6ef', '#effaf2', '#fff0f6', '#f7f3f
 const SETTINGS_CARD_HEIGHT = 96;
 const SETTINGS_CARD_GAP = 12;
 const SETTINGS_CARD_STEP = SETTINGS_CARD_HEIGHT + SETTINGS_CARD_GAP;
+const WEEKDAY_OPTIONS: { id: WeekdayKey; label: string }[] = [
+  { id: 'mon', label: 'Пн' },
+  { id: 'tue', label: 'Вт' },
+  { id: 'wed', label: 'Ср' },
+  { id: 'thu', label: 'Чт' },
+  { id: 'fri', label: 'Пт' },
+  { id: 'sat', label: 'Сб' },
+  { id: 'sun', label: 'Вс' },
+];
+
+const TITLE_SUGGESTIONS: Record<TemplateBlockKind, string[]> = {
+  traits: ['Спокойная реакция', 'Дисциплина в мелочах', 'Уверенный тон', 'Фокус без отвлечений'],
+  habits: ['Утренняя зарядка', 'Чтение 20 минут', 'План на день', 'Ранний отход ко сну'],
+  emotions: ['Пауза перед ответом', 'Контроль раздражения', 'Техники расслабления', 'Управление тревогой'],
+  values: ['Быть честным', 'Уважение к близким', 'Последовательность', 'Ответственность и честность'],
+};
+
+type TaskWizardStep = 1 | 2 | 3 | 4;
+
+interface TaskDraft {
+  title: string;
+  description: string;
+  motivation: string;
+  motivationImageUri: string;
+  reminders: TaskReminderSettings;
+}
 
 function createGoal(category: GoalCategory): UserGoal {
   const template = GOAL_TEMPLATES.find((item) => item.id === category);
   return {
     id: `${category}-${Date.now()}`,
     category,
-    customAction: template?.description ?? 'Стать лучше в выбранной сфере',
+    customAction: template?.description ?? 'Новый шаг в развитии себя',
     isActive: true,
   };
 }
@@ -102,6 +139,57 @@ function sectionPlaceholder(kind: SettingsBlockKind): string {
   return 'Введите описание или заметку';
 }
 
+function createTaskDraft(): TaskDraft {
+  return {
+    title: '',
+    description: '',
+    motivation: '',
+    motivationImageUri: '',
+    reminders: {
+      enabled: false,
+      config: {
+        mode: 'fixed',
+        weekdays: ['mon', 'tue', 'wed', 'thu', 'fri'],
+        times: [],
+      },
+    },
+  };
+}
+
+function normalizeTimeValue(value: string): string | null {
+  const match = value.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) {
+    return null;
+  }
+
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return null;
+  }
+
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+function weekdayLabel(day: WeekdayKey): string {
+  const found = WEEKDAY_OPTIONS.find((item) => item.id === day);
+  return found?.label ?? day;
+}
+
+function taskReminderSummary(reminders: TaskReminderSettings): string {
+  if (!reminders.enabled) {
+    return 'Напоминания выключены';
+  }
+
+  const days = reminders.config.weekdays.map(weekdayLabel).join(', ');
+  if (reminders.config.mode === 'fixed') {
+    const times = reminders.config.times.length ? reminders.config.times.join(', ') : 'время не выбрано';
+    return `Фиксированно: ${days}, в ${times}`;
+  }
+
+  return `Случайно: ${days}, ${hourLabel(reminders.config.startHour)}-${hourLabel(reminders.config.endHour)}, ${reminders.config.timesInWindow} раз(а)`;
+}
+
 export default function App() {
   const [state, setState] = useState<AppState>(defaultState);
   const [loaded, setLoaded] = useState(false);
@@ -117,6 +205,13 @@ export default function App() {
   const [isAddModalVisible, setIsAddModalVisible] = useState(false);
   const [isNewBlockModalVisible, setIsNewBlockModalVisible] = useState(false);
   const [newBlockName, setNewBlockName] = useState('');
+  const [isTaskModalVisible, setIsTaskModalVisible] = useState(false);
+  const [taskWizardStep, setTaskWizardStep] = useState<TaskWizardStep>(1);
+  const [taskDraft, setTaskDraft] = useState<TaskDraft>(createTaskDraft);
+  const [taskBlockId, setTaskBlockId] = useState<string | null>(null);
+  const [fixedTimeInput, setFixedTimeInput] = useState('');
+  const [isImageUriModalVisible, setIsImageUriModalVisible] = useState(false);
+  const [imageUriInput, setImageUriInput] = useState('');
   const [isReorderMode, setIsReorderMode] = useState(false);
   const [draftBlocks, setDraftBlocks] = useState<SettingsBlock[]>([]);
   const [draggingBlockId, setDraggingBlockId] = useState<string | null>(null);
@@ -172,6 +267,17 @@ export default function App() {
     () => visibleSettingsBlocks.find((block) => block.id === draggingBlockId) ?? null,
     [draggingBlockId, visibleSettingsBlocks],
   );
+  const selectedBlockTasks = useMemo(
+    () => (selectedSettingsBlock ? state.sectionTasks[selectedSettingsBlock.id] ?? [] : []),
+    [selectedSettingsBlock, state.sectionTasks],
+  );
+  const selectedBlockTitleSuggestions = useMemo(() => {
+    if (!selectedSettingsBlock || selectedSettingsBlock.kind === 'custom') {
+      return [];
+    }
+
+    return TITLE_SUGGESTIONS[selectedSettingsBlock.kind as TemplateBlockKind] ?? [];
+  }, [selectedSettingsBlock]);
 
   useEffect(() => {
     if (!loaded) {
@@ -332,7 +438,7 @@ export default function App() {
       };
     });
 
-    Alert.alert('Сохранено', 'Чек-ин за сегодня сохранён.');
+    Alert.alert('Сохранено', 'Чекин за сегодня сохранен.');
   };
 
   const selectMenuItem = (tab: TabKey) => {
@@ -448,12 +554,15 @@ export default function App() {
   const deleteBlock = (blockId: string) => {
     setState((prev) => {
       const nextNotes = { ...prev.sectionNotes };
+      const nextTasks = { ...prev.sectionTasks };
       delete nextNotes[blockId];
+      delete nextTasks[blockId];
 
       return {
         ...prev,
         settingsBlocks: prev.settingsBlocks.filter((block) => block.id !== blockId),
         sectionNotes: nextNotes,
+        sectionTasks: nextTasks,
       };
     });
 
@@ -514,6 +623,182 @@ export default function App() {
     setIsNewBlockModalVisible(false);
   };
 
+  const openTaskWizard = () => {
+    if (!selectedSettingsBlock) {
+      return;
+    }
+
+    setTaskBlockId(selectedSettingsBlock.id);
+    setTaskDraft(createTaskDraft());
+    setTaskWizardStep(1);
+    setFixedTimeInput('');
+    setIsTaskModalVisible(true);
+  };
+
+  const closeTaskWizard = () => {
+    setIsTaskModalVisible(false);
+    setTaskBlockId(null);
+    setTaskWizardStep(1);
+    setTaskDraft(createTaskDraft());
+    setFixedTimeInput('');
+  };
+
+  const toggleReminderWeekday = (day: WeekdayKey) => {
+    setTaskDraft((prev) => {
+      const list = prev.reminders.config.weekdays;
+      const exists = list.includes(day);
+      const nextWeekdays = exists ? list.filter((item) => item !== day) : [...list, day];
+
+      return {
+        ...prev,
+        reminders: {
+          ...prev.reminders,
+          config: {
+            ...prev.reminders.config,
+            weekdays: nextWeekdays,
+          },
+        },
+      };
+    });
+  };
+
+  const switchReminderMode = (mode: 'fixed' | 'random') => {
+    setTaskDraft((prev) => ({
+      ...prev,
+      reminders: {
+        ...prev.reminders,
+        config:
+          mode === 'fixed'
+            ? {
+                mode: 'fixed',
+                weekdays: prev.reminders.config.weekdays,
+                times: prev.reminders.config.mode === 'fixed' ? prev.reminders.config.times : [],
+              }
+            : {
+                mode: 'random',
+                weekdays: prev.reminders.config.weekdays,
+                startHour: prev.reminders.config.mode === 'random' ? prev.reminders.config.startHour : 9,
+                endHour: prev.reminders.config.mode === 'random' ? prev.reminders.config.endHour : 21,
+                timesInWindow: prev.reminders.config.mode === 'random' ? prev.reminders.config.timesInWindow : 3,
+              },
+      },
+    }));
+  };
+
+  const addFixedTime = () => {
+    const normalized = normalizeTimeValue(fixedTimeInput);
+    if (!normalized) {
+      Alert.alert('Некорректное время', 'Введите время в формате ЧЧ:ММ, например 09:30.');
+      return;
+    }
+
+    setTaskDraft((prev) => {
+      if (prev.reminders.config.mode !== 'fixed') {
+        return prev;
+      }
+
+      if (prev.reminders.config.times.includes(normalized)) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        reminders: {
+          ...prev.reminders,
+          config: {
+            ...prev.reminders.config,
+            times: [...prev.reminders.config.times, normalized].sort(),
+          },
+        },
+      };
+    });
+    setFixedTimeInput('');
+  };
+
+  const removeFixedTime = (time: string) => {
+    setTaskDraft((prev) => {
+      if (prev.reminders.config.mode !== 'fixed') {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        reminders: {
+          ...prev.reminders,
+          config: {
+            ...prev.reminders.config,
+            times: prev.reminders.config.times.filter((item) => item !== time),
+          },
+        },
+      };
+    });
+  };
+
+  const canProceedTaskStep = useMemo(() => {
+    if (taskWizardStep === 1) {
+      return taskDraft.title.trim().length > 0;
+    }
+    if (taskWizardStep === 2) {
+      return taskDraft.description.trim().length > 0;
+    }
+    if (taskWizardStep === 3) {
+      return taskDraft.motivation.trim().length > 0;
+    }
+
+    if (!taskDraft.reminders.enabled) {
+      return true;
+    }
+
+    const weekdaysSelected = taskDraft.reminders.config.weekdays.length > 0;
+    if (!weekdaysSelected) {
+      return false;
+    }
+
+    if (taskDraft.reminders.config.mode === 'fixed') {
+      return taskDraft.reminders.config.times.length > 0;
+    }
+
+    return taskDraft.reminders.config.endHour > taskDraft.reminders.config.startHour;
+  }, [taskDraft, taskWizardStep]);
+
+  const nextTaskWizardStep = () => {
+    if (!canProceedTaskStep) {
+      Alert.alert('Заполните шаг', 'Добавьте данные на текущем этапе, чтобы продолжить.');
+      return;
+    }
+
+    if (taskWizardStep === 4) {
+      if (!taskBlockId) {
+        return;
+      }
+
+      const newTask: BlockTask = {
+        id: `task-${Date.now()}`,
+        title: taskDraft.title.trim(),
+        description: taskDraft.description.trim(),
+        motivation: taskDraft.motivation.trim(),
+        motivationImageUri: taskDraft.motivationImageUri.trim(),
+        reminders: taskDraft.reminders,
+      };
+
+      setState((prev) => ({
+        ...prev,
+        sectionTasks: {
+          ...prev.sectionTasks,
+          [taskBlockId]: [...(prev.sectionTasks[taskBlockId] ?? []), newTask],
+        },
+      }));
+      closeTaskWizard();
+      return;
+    }
+
+    setTaskWizardStep((prev) => (prev === 4 ? 4 : ((prev + 1) as TaskWizardStep)));
+  };
+
+  const prevTaskWizardStep = () => {
+    setTaskWizardStep((prev) => (prev === 1 ? 1 : ((prev - 1) as TaskWizardStep)));
+  };
+
   const openPaywall = () => selectMenuItem('premium');
 
   const finishOnboarding = () => {
@@ -523,7 +808,7 @@ export default function App() {
     }
 
     if (!state.goals.length) {
-      Alert.alert('Выберите цель', 'Добавьте хотя бы одну цель на этапе настройки.');
+      Alert.alert('Выберите цель', 'Выберите хотя бы одну цель, чтобы пройти дальше.');
       return;
     }
 
@@ -540,8 +825,8 @@ export default function App() {
   const renderTraitsSettings = () => (
     <>
       <SectionCard
-        title="Настройка целей"
-        subtitle="Выберите направления, в которых хотите становиться лучше"
+        title="Выберите цели"
+        subtitle="Отметьте направления, в которых хотите развивать себя"
       >
         {GOAL_TEMPLATES.map((template) => {
           const selected = state.goals.find((goal) => goal.category === template.id);
@@ -553,7 +838,7 @@ export default function App() {
                   style={styles.input}
                   value={selected.customAction}
                   onChangeText={(text) => updateGoalAction(template.id, text)}
-                  placeholder="Например: отвечать спокойно в чатах"
+                  placeholder="Например: говорить спокойнее в сложных ситуациях"
                 />
               ) : null}
             </View>
@@ -561,7 +846,7 @@ export default function App() {
         })}
       </SectionCard>
 
-      <SectionCard title="Напоминания" subtitle="Включите push-уведомления и настройте частоту">
+      <SectionCard title="Напоминания" subtitle="Настройте push-уведомления в удобном режиме">
         <View style={styles.rowBetween}>
           <Text style={styles.label}>Включить напоминания</Text>
           <Switch
@@ -644,20 +929,28 @@ export default function App() {
     </>
   );
 
+  const renderTaskCards = () => (
+    <SectionCard title="Задачи блока" subtitle="Ниже отображаются созданные вами задачи">
+      {selectedBlockTasks.length === 0 ? (
+        <Text style={styles.helper}>Пока нет задач. Нажмите кнопку выше, чтобы добавить первую.</Text>
+      ) : (
+        selectedBlockTasks.map((task) => (
+          <View key={task.id} style={styles.taskCard}>
+            <Text style={styles.taskCardTitle}>{task.title}</Text>
+            <Text style={styles.taskCardText}>{task.description}</Text>
+            <Text style={styles.taskCardLabel}>Мотивация</Text>
+            <Text style={styles.taskCardText}>{task.motivation}</Text>
+            {task.motivationImageUri ? <Image source={{ uri: task.motivationImageUri }} style={styles.taskImage} /> : null}
+            <Text style={styles.taskReminderText}>{taskReminderSummary(task.reminders)}</Text>
+          </View>
+        ))
+      )}
+    </SectionCard>
+  );
+
   const renderSettingsSection = () => {
     if (!selectedSettingsBlock) {
       return null;
-    }
-
-    if (selectedSettingsBlock.kind === 'traits') {
-      return (
-        <>
-          <Pressable style={styles.backBtn} onPress={() => setSettingsSection(null)}>
-            <Text style={styles.backBtnText}>{'< Назад'}</Text>
-          </Pressable>
-          {renderTraitsSettings()}
-        </>
-      );
     }
 
     return (
@@ -665,7 +958,14 @@ export default function App() {
         <Pressable style={styles.backBtn} onPress={() => setSettingsSection(null)}>
           <Text style={styles.backBtnText}>{'< Назад'}</Text>
         </Pressable>
-        <SectionCard title={selectedSettingsBlock.title} subtitle={sectionSubtitle(selectedSettingsBlock.kind)}>
+
+        <Text style={styles.sectionHeaderTitle}>{selectedSettingsBlock.title}</Text>
+
+        <Pressable style={styles.blockTopAddBtn} onPress={openTaskWizard}>
+          <Text style={styles.blockTopAddBtnText}>+ Добавить задачу</Text>
+        </Pressable>
+
+        <SectionCard title="Заметки" subtitle={sectionSubtitle(selectedSettingsBlock.kind)}>
           <TextInput
             style={[styles.input, styles.noteInput]}
             placeholder={sectionPlaceholder(selectedSettingsBlock.kind)}
@@ -674,6 +974,8 @@ export default function App() {
             multiline
           />
         </SectionCard>
+
+        {renderTaskCards()}
       </>
     );
   };
@@ -717,7 +1019,7 @@ export default function App() {
                     setActiveMenuBlockId(block.id);
                   }}
                 >
-                  <Text style={styles.settingsMenuBtnText}>⋮</Text>
+                  <Text style={styles.settingsMenuBtnText}>{'\u22EE'}</Text>
                 </Pressable>
               ) : (
                 <Text style={styles.dragHint}>Перетаскивание</Text>
@@ -751,7 +1053,7 @@ export default function App() {
 
       {isReorderMode ? (
         <Pressable style={styles.applyReorderBtn} onPress={applyReorder}>
-          <Text style={styles.applyReorderBtnText}>✓</Text>
+          <Text style={styles.applyReorderBtnText}>{'\u2713'}</Text>
         </Pressable>
       ) : null}
     </View>
@@ -771,7 +1073,7 @@ export default function App() {
         <ExpoStatusBar style="dark" />
         <ScrollView contentContainerStyle={styles.content}>
           <Text style={styles.appTitle}>Добро пожаловать в Character+</Text>
-          <Text style={styles.appSubtitle}>Сделаем короткую первичную настройку в 3 шага.</Text>
+          <Text style={styles.appSubtitle}>Пройдите короткую первичную настройку в 3 шага.</Text>
 
           <SectionCard title={`Шаг ${onboardingStep} из 3`}>
             {onboardingStep === 1 ? (
@@ -895,6 +1197,397 @@ export default function App() {
           />
         ) : null}
       </ScrollView>
+
+      <Modal visible={isTaskModalVisible} transparent animationType="fade" onRequestClose={closeTaskWizard}>
+        <View style={styles.modalBackdrop}>
+          <Pressable style={styles.modalDismissLayer} onPress={closeTaskWizard} />
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>{`Шаг ${taskWizardStep} из 4`}</Text>
+            <Text style={styles.modalStepTitle}>
+              {taskWizardStep === 1
+                ? 'Название задачи'
+                : taskWizardStep === 2
+                  ? 'Описание задачи'
+                  : taskWizardStep === 3
+                    ? 'Мотивация'
+                    : 'Напоминания'}
+            </Text>
+
+            {taskWizardStep === 1 ? (
+              <>
+                <TextInput
+                  style={styles.modalInput}
+                  value={taskDraft.title}
+                  onChangeText={(title) => setTaskDraft((prev) => ({ ...prev, title }))}
+                  placeholder="Введите название задачи"
+                />
+                {selectedBlockTitleSuggestions.length > 0 ? (
+                  <View style={styles.suggestionsWrap}>
+                    {selectedBlockTitleSuggestions.map((item) => (
+                      <Pressable
+                        key={item}
+                        style={styles.suggestionChip}
+                        onPress={() => setTaskDraft((prev) => ({ ...prev, title: item }))}
+                      >
+                        <Text style={styles.suggestionChipText}>{item}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
+              </>
+            ) : null}
+
+            {taskWizardStep === 2 ? (
+              <TextInput
+                style={[styles.modalInput, styles.modalTextarea]}
+                value={taskDraft.description}
+                onChangeText={(description) => setTaskDraft((prev) => ({ ...prev, description }))}
+                placeholder="Опишите, что именно и как вы хотите делать по этой задаче"
+                multiline
+              />
+            ) : null}
+
+            {taskWizardStep === 3 ? (
+              <>
+                <TextInput
+                  style={[styles.modalInput, styles.modalTextarea]}
+                  value={taskDraft.motivation}
+                  onChangeText={(motivation) => setTaskDraft((prev) => ({ ...prev, motivation }))}
+                  placeholder="Укажите вашу мотивацию - ради чего или кого вы меняетесь"
+                  multiline
+                />
+
+                <Pressable
+                  style={styles.modalActionBtn}
+                  onPress={() => {
+                    setImageUriInput(taskDraft.motivationImageUri);
+                    setIsImageUriModalVisible(true);
+                  }}
+                >
+                  <Text style={styles.modalActionText}>Загрузить</Text>
+                </Pressable>
+                <Text style={styles.modalHint}>Сюда можно загрузить фотографию, которая вас будет мотивировать.</Text>
+
+                {taskDraft.motivationImageUri ? (
+                  <Image source={{ uri: taskDraft.motivationImageUri }} style={styles.taskImagePreview} />
+                ) : null}
+              </>
+            ) : null}
+
+            {taskWizardStep === 4 ? (
+              <>
+                <View style={styles.rowBetween}>
+                  <Text style={styles.label}>Включить напоминания</Text>
+                  <Switch
+                    value={taskDraft.reminders.enabled}
+                    onValueChange={(enabled) =>
+                      setTaskDraft((prev) => ({
+                        ...prev,
+                        reminders: {
+                          ...prev.reminders,
+                          enabled,
+                        },
+                      }))
+                    }
+                  />
+                </View>
+
+                {taskDraft.reminders.enabled ? (
+                  <>
+                    <View style={styles.modeRow}>
+                      <Pressable
+                        style={[
+                          styles.modeChip,
+                          taskDraft.reminders.config.mode === 'fixed' ? styles.modeChipActive : null,
+                        ]}
+                        onPress={() => switchReminderMode('fixed')}
+                      >
+                        <Text
+                          style={[
+                            styles.modeChipText,
+                            taskDraft.reminders.config.mode === 'fixed' ? styles.modeChipTextActive : null,
+                          ]}
+                        >
+                          Фиксированное время
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        style={[
+                          styles.modeChip,
+                          taskDraft.reminders.config.mode === 'random' ? styles.modeChipActive : null,
+                        ]}
+                        onPress={() => switchReminderMode('random')}
+                      >
+                        <Text
+                          style={[
+                            styles.modeChipText,
+                            taskDraft.reminders.config.mode === 'random' ? styles.modeChipTextActive : null,
+                          ]}
+                        >
+                          Случайно в промежутке
+                        </Text>
+                      </Pressable>
+                    </View>
+
+                    <Text style={styles.modalSectionLabel}>Дни недели</Text>
+                    <View style={styles.weekdayRow}>
+                      {WEEKDAY_OPTIONS.map((day) => {
+                        const selected = taskDraft.reminders.config.weekdays.includes(day.id);
+                        return (
+                          <Pressable
+                            key={day.id}
+                            style={[styles.weekdayChip, selected ? styles.weekdayChipActive : null]}
+                            onPress={() => toggleReminderWeekday(day.id)}
+                          >
+                            <Text style={[styles.weekdayChipText, selected ? styles.weekdayChipTextActive : null]}>
+                              {day.label}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+
+                    {taskDraft.reminders.config.mode === 'fixed' ? (
+                      <>
+                        <Text style={styles.modalSectionLabel}>Точное время (можно добавить несколько)</Text>
+                        <View style={styles.timeInputRow}>
+                          <TextInput
+                            style={[styles.modalInput, styles.timeInput]}
+                            value={fixedTimeInput}
+                            onChangeText={setFixedTimeInput}
+                            placeholder="Например 09:30"
+                          />
+                          <Pressable style={styles.timeAddBtn} onPress={addFixedTime}>
+                            <Text style={styles.timeAddBtnText}>Добавить</Text>
+                          </Pressable>
+                        </View>
+                        <View style={styles.suggestionsWrap}>
+                          {taskDraft.reminders.config.times.map((time) => (
+                            <Pressable key={time} style={styles.suggestionChip} onPress={() => removeFixedTime(time)}>
+                              <Text style={styles.suggestionChipText}>{time} ×</Text>
+                            </Pressable>
+                          ))}
+                        </View>
+                      </>
+                    ) : (
+                      <>
+                        <Text style={styles.modalSectionLabel}>Временное окно</Text>
+                        <View style={styles.rowBetween}>
+                          <Text style={styles.label}>С</Text>
+                          <View style={styles.counterRow}>
+                            <Pressable
+                              style={styles.counterBtn}
+                              onPress={() =>
+                                setTaskDraft((prev) => {
+                                  if (prev.reminders.config.mode !== 'random') {
+                                    return prev;
+                                  }
+                                  const startHour = clamp(prev.reminders.config.startHour - 1, 0, 22);
+                                  const endHour = Math.max(prev.reminders.config.endHour, startHour + 1);
+                                  return {
+                                    ...prev,
+                                    reminders: {
+                                      ...prev.reminders,
+                                      config: { ...prev.reminders.config, startHour, endHour },
+                                    },
+                                  };
+                                })
+                              }
+                            >
+                              <Text style={styles.counterBtnText}>-</Text>
+                            </Pressable>
+                            <Text style={styles.counterValue}>
+                              {taskDraft.reminders.config.mode === 'random'
+                                ? `${String(taskDraft.reminders.config.startHour).padStart(2, '0')}:00`
+                                : '--:--'}
+                            </Text>
+                            <Pressable
+                              style={styles.counterBtn}
+                              onPress={() =>
+                                setTaskDraft((prev) => {
+                                  if (prev.reminders.config.mode !== 'random') {
+                                    return prev;
+                                  }
+                                  const startHour = clamp(prev.reminders.config.startHour + 1, 0, 22);
+                                  const endHour = Math.max(prev.reminders.config.endHour, startHour + 1);
+                                  return {
+                                    ...prev,
+                                    reminders: {
+                                      ...prev.reminders,
+                                      config: { ...prev.reminders.config, startHour, endHour },
+                                    },
+                                  };
+                                })
+                              }
+                            >
+                              <Text style={styles.counterBtnText}>+</Text>
+                            </Pressable>
+                          </View>
+                        </View>
+
+                        <View style={styles.rowBetween}>
+                          <Text style={styles.label}>До</Text>
+                          <View style={styles.counterRow}>
+                            <Pressable
+                              style={styles.counterBtn}
+                              onPress={() =>
+                                setTaskDraft((prev) => {
+                                  if (prev.reminders.config.mode !== 'random') {
+                                    return prev;
+                                  }
+                                  const endHour = clamp(prev.reminders.config.endHour - 1, 1, 23);
+                                  const startHour = Math.min(prev.reminders.config.startHour, endHour - 1);
+                                  return {
+                                    ...prev,
+                                    reminders: {
+                                      ...prev.reminders,
+                                      config: { ...prev.reminders.config, startHour, endHour },
+                                    },
+                                  };
+                                })
+                              }
+                            >
+                              <Text style={styles.counterBtnText}>-</Text>
+                            </Pressable>
+                            <Text style={styles.counterValue}>
+                              {taskDraft.reminders.config.mode === 'random'
+                                ? `${String(taskDraft.reminders.config.endHour).padStart(2, '0')}:00`
+                                : '--:--'}
+                            </Text>
+                            <Pressable
+                              style={styles.counterBtn}
+                              onPress={() =>
+                                setTaskDraft((prev) => {
+                                  if (prev.reminders.config.mode !== 'random') {
+                                    return prev;
+                                  }
+                                  const endHour = clamp(prev.reminders.config.endHour + 1, 1, 23);
+                                  const startHour = Math.min(prev.reminders.config.startHour, endHour - 1);
+                                  return {
+                                    ...prev,
+                                    reminders: {
+                                      ...prev.reminders,
+                                      config: { ...prev.reminders.config, startHour, endHour },
+                                    },
+                                  };
+                                })
+                              }
+                            >
+                              <Text style={styles.counterBtnText}>+</Text>
+                            </Pressable>
+                          </View>
+                        </View>
+
+                        <View style={styles.rowBetween}>
+                          <Text style={styles.label}>Раз в окне</Text>
+                          <View style={styles.counterRow}>
+                            <Pressable
+                              style={styles.counterBtn}
+                              onPress={() =>
+                                setTaskDraft((prev) => {
+                                  if (prev.reminders.config.mode !== 'random') {
+                                    return prev;
+                                  }
+                                  return {
+                                    ...prev,
+                                    reminders: {
+                                      ...prev.reminders,
+                                      config: {
+                                        ...prev.reminders.config,
+                                        timesInWindow: Math.max(1, prev.reminders.config.timesInWindow - 1),
+                                      },
+                                    },
+                                  };
+                                })
+                              }
+                            >
+                              <Text style={styles.counterBtnText}>-</Text>
+                            </Pressable>
+                            <Text style={styles.counterValue}>
+                              {taskDraft.reminders.config.mode === 'random'
+                                ? taskDraft.reminders.config.timesInWindow
+                                : 0}
+                            </Text>
+                            <Pressable
+                              style={styles.counterBtn}
+                              onPress={() =>
+                                setTaskDraft((prev) => {
+                                  if (prev.reminders.config.mode !== 'random') {
+                                    return prev;
+                                  }
+                                  return {
+                                    ...prev,
+                                    reminders: {
+                                      ...prev.reminders,
+                                      config: {
+                                        ...prev.reminders.config,
+                                        timesInWindow: Math.min(12, prev.reminders.config.timesInWindow + 1),
+                                      },
+                                    },
+                                  };
+                                })
+                              }
+                            >
+                              <Text style={styles.counterBtnText}>+</Text>
+                            </Pressable>
+                          </View>
+                        </View>
+                      </>
+                    )}
+                  </>
+                ) : null}
+              </>
+            ) : null}
+
+            <View style={styles.modalActionsRow}>
+              <Pressable
+                style={styles.modalCancelBtnSmall}
+                onPress={taskWizardStep === 1 ? closeTaskWizard : prevTaskWizardStep}
+              >
+                <Text style={styles.modalCancelText}>{taskWizardStep === 1 ? 'Отмена' : 'Назад'}</Text>
+              </Pressable>
+              <Pressable style={styles.modalConfirmBtn} onPress={nextTaskWizardStep}>
+                <Text style={styles.modalConfirmText}>{taskWizardStep === 4 ? 'Создать задачу' : 'Далее'}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={isImageUriModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsImageUriModalVisible(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <Pressable style={styles.modalDismissLayer} onPress={() => setIsImageUriModalVisible(false)} />
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Изображение мотивации</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={imageUriInput}
+              onChangeText={setImageUriInput}
+              placeholder="Вставьте ссылку или локальный путь к фото"
+            />
+            <Text style={styles.modalHint}>После сохранения фото будет отображаться в задаче.</Text>
+            <View style={styles.modalActionsRow}>
+              <Pressable style={styles.modalCancelBtnSmall} onPress={() => setIsImageUriModalVisible(false)}>
+                <Text style={styles.modalCancelText}>Отмена</Text>
+              </Pressable>
+              <Pressable
+                style={styles.modalConfirmBtn}
+                onPress={() => {
+                  setTaskDraft((prev) => ({ ...prev, motivationImageUri: imageUriInput.trim() }));
+                  setIsImageUriModalVisible(false);
+                }}
+              >
+                <Text style={styles.modalConfirmText}>Сохранить</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={Boolean(activeMenuBlock)} transparent animationType="fade" onRequestClose={() => setActiveMenuBlockId(null)}>
         <View style={styles.modalBackdrop}>
@@ -1157,6 +1850,60 @@ const styles = StyleSheet.create({
     color: '#3f568f',
     fontWeight: '700',
   },
+  sectionHeaderTitle: {
+    color: '#1f325f',
+    fontWeight: '800',
+    fontSize: 24,
+    marginBottom: 8,
+  },
+  blockTopAddBtn: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#c4d5fb',
+    backgroundColor: '#fff',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    alignSelf: 'flex-start',
+    marginBottom: 12,
+  },
+  blockTopAddBtnText: {
+    color: '#2e56b6',
+    fontWeight: '700',
+  },
+  taskCard: {
+    borderWidth: 1,
+    borderColor: '#d7e3ff',
+    borderRadius: 12,
+    backgroundColor: '#f8fbff',
+    padding: 12,
+    gap: 6,
+  },
+  taskCardTitle: {
+    color: '#1d356f',
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  taskCardLabel: {
+    color: '#3d5487',
+    fontWeight: '700',
+    marginTop: 4,
+  },
+  taskCardText: {
+    color: '#384c77',
+    lineHeight: 19,
+  },
+  taskReminderText: {
+    color: '#34579f',
+    fontWeight: '600',
+    marginTop: 4,
+  },
+  taskImage: {
+    width: '100%',
+    height: 170,
+    borderRadius: 10,
+    backgroundColor: '#dfe8ff',
+    marginTop: 4,
+  },
   appTitle: {
     fontSize: 28,
     fontWeight: '800',
@@ -1286,6 +2033,11 @@ const styles = StyleSheet.create({
     color: '#20366f',
     marginBottom: 2,
   },
+  modalStepTitle: {
+    color: '#4f669b',
+    fontWeight: '600',
+    marginBottom: 2,
+  },
   modalActionBtn: {
     borderWidth: 1,
     borderColor: '#d8e4ff',
@@ -1329,6 +2081,118 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     color: '#1d2b50',
     backgroundColor: '#fff',
+  },
+  modalTextarea: {
+    minHeight: 110,
+    textAlignVertical: 'top',
+  },
+  modalHint: {
+    color: '#5f6f96',
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  taskImagePreview: {
+    width: '100%',
+    height: 170,
+    borderRadius: 10,
+    backgroundColor: '#dfe8ff',
+    marginTop: 6,
+  },
+  suggestionsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  suggestionChip: {
+    borderWidth: 1,
+    borderColor: '#cad7fb',
+    backgroundColor: '#f4f8ff',
+    borderRadius: 999,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  suggestionChipText: {
+    color: '#3b5694',
+    fontWeight: '600',
+    fontSize: 12,
+  },
+  modeRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 6,
+  },
+  modeChip: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#cad7fb',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+    backgroundColor: '#fff',
+  },
+  modeChipActive: {
+    backgroundColor: '#2f5ee5',
+    borderColor: '#2f5ee5',
+  },
+  modeChipText: {
+    color: '#3e5b9c',
+    fontWeight: '600',
+    fontSize: 12,
+  },
+  modeChipTextActive: {
+    color: '#fff',
+  },
+  modalSectionLabel: {
+    color: '#304578',
+    fontWeight: '700',
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  weekdayRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  weekdayChip: {
+    width: 42,
+    height: 36,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: '#cad7fb',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+  },
+  weekdayChipActive: {
+    backgroundColor: '#2f5ee5',
+    borderColor: '#2f5ee5',
+  },
+  weekdayChipText: {
+    color: '#3e5b9c',
+    fontWeight: '700',
+  },
+  weekdayChipTextActive: {
+    color: '#fff',
+  },
+  timeInputRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  timeInput: {
+    flex: 1,
+  },
+  timeAddBtn: {
+    borderRadius: 10,
+    backgroundColor: '#2f5ee5',
+    paddingVertical: 11,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  timeAddBtnText: {
+    color: '#fff',
+    fontWeight: '700',
   },
   modalActionsRow: {
     marginTop: 4,

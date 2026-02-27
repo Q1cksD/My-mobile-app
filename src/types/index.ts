@@ -42,6 +42,37 @@ export interface SettingsBlock {
   color: string;
 }
 
+export type ReminderMode = 'fixed' | 'random';
+export type WeekdayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+
+export interface FixedTaskReminder {
+  mode: 'fixed';
+  weekdays: WeekdayKey[];
+  times: string[];
+}
+
+export interface RandomTaskReminder {
+  mode: 'random';
+  weekdays: WeekdayKey[];
+  startHour: number;
+  endHour: number;
+  timesInWindow: number;
+}
+
+export interface TaskReminderSettings {
+  enabled: boolean;
+  config: FixedTaskReminder | RandomTaskReminder;
+}
+
+export interface BlockTask {
+  id: string;
+  title: string;
+  description: string;
+  motivation: string;
+  motivationImageUri: string;
+  reminders: TaskReminderSettings;
+}
+
 export interface AppState {
   goals: UserGoal[];
   reminderSettings: ReminderSettings;
@@ -49,4 +80,5 @@ export interface AppState {
   profile: UserProfile;
   settingsBlocks: SettingsBlock[];
   sectionNotes: Record<string, string>;
+  sectionTasks: Record<string, BlockTask[]>;
 }
