@@ -26,6 +26,7 @@ import { lastNDays, todayKey } from './utils/date';
 import { defaultState, loadState, saveState } from './utils/storage';
 
 type TabKey = 'home' | 'history' | 'settings' | 'premium' | 'profile';
+type SettingsSection = 'traits' | 'emotions' | 'habits' | 'values' | null;
 
 function createGoal(category: GoalCategory): UserGoal {
   const template = GOAL_TEMPLATES.find((item) => item.id === category);
@@ -49,10 +50,14 @@ export default function App() {
   const [state, setState] = useState<AppState>(defaultState);
   const [loaded, setLoaded] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>('settings');
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>(null);
   const [onboardingStep, setOnboardingStep] = useState(1);
   const [historyRange, setHistoryRange] = useState<HistoryRange>(7);
   const [checkinScore, setCheckinScore] = useState<number | null>(null);
   const [checkinNote, setCheckinNote] = useState('');
+  const [emotionPlan, setEmotionPlan] = useState('');
+  const [habitPlan, setHabitPlan] = useState('');
+  const [valuesPlan, setValuesPlan] = useState('');
   const { setupNotifications } = useNotifications();
 
   const androidTopInset = Platform.OS === 'android' ? (RNStatusBar.currentHeight ?? 0) : 0;
@@ -187,6 +192,9 @@ export default function App() {
 
   const selectMenuItem = (tab: TabKey) => {
     setActiveTab(tab);
+    if (tab === 'settings') {
+      setSettingsSection(null);
+    }
   };
 
   const openPaywall = () => selectMenuItem('premium');
@@ -212,7 +220,7 @@ export default function App() {
     setActiveTab('settings');
   };
 
-  const renderSettingsContent = () => (
+  const renderTraitsSettings = () => (
     <>
       <SectionCard
         title="Настройка целей"
@@ -236,7 +244,7 @@ export default function App() {
         })}
       </SectionCard>
 
-      <SectionCard title="Напоминания" subtitle="Настройте частоту и окно времени уведомлений">
+      <SectionCard title="Напоминания" subtitle="Включите push-уведомления и настройте частоту">
         <View style={styles.rowBetween}>
           <Text style={styles.label}>Включить напоминания</Text>
           <Switch
@@ -319,6 +327,94 @@ export default function App() {
     </>
   );
 
+  const renderSettingsSection = () => {
+    if (settingsSection === 'traits') {
+      return (
+        <>
+          <Pressable style={styles.backBtn} onPress={() => setSettingsSection(null)}>
+            <Text style={styles.backBtnText}>{'< Назад'}</Text>
+          </Pressable>
+          {renderTraitsSettings()}
+        </>
+      );
+    }
+
+    if (settingsSection === 'emotions') {
+      return (
+        <>
+          <Pressable style={styles.backBtn} onPress={() => setSettingsSection(null)}>
+            <Text style={styles.backBtnText}>{'< Назад'}</Text>
+          </Pressable>
+          <SectionCard title="Эмоции" subtitle="Что вы хотите контролировать в течение недели">
+            <TextInput
+              style={[styles.input, styles.noteInput]}
+              placeholder="Например: делать паузу и 3 глубоких вдоха перед ответом"
+              value={emotionPlan}
+              onChangeText={setEmotionPlan}
+              multiline
+            />
+          </SectionCard>
+        </>
+      );
+    }
+
+    if (settingsSection === 'habits') {
+      return (
+        <>
+          <Pressable style={styles.backBtn} onPress={() => setSettingsSection(null)}>
+            <Text style={styles.backBtnText}>{'< Назад'}</Text>
+          </Pressable>
+          <SectionCard title="Привычки" subtitle="Опишите привычку, которую хотите добавить">
+            <TextInput
+              style={[styles.input, styles.noteInput]}
+              placeholder="Например: 20 минут чтения каждый день"
+              value={habitPlan}
+              onChangeText={setHabitPlan}
+              multiline
+            />
+          </SectionCard>
+        </>
+      );
+    }
+
+  return (
+      <>
+        <Pressable style={styles.backBtn} onPress={() => setSettingsSection(null)}>
+          <Text style={styles.backBtnText}>{'< Назад'}</Text>
+        </Pressable>
+        <SectionCard title="Ценности и убеждения" subtitle="Сформулируйте личные принципы">
+          <TextInput
+            style={[styles.input, styles.noteInput]}
+            placeholder="Например: быть последовательным и уважительным в общении"
+            value={valuesPlan}
+            onChangeText={setValuesPlan}
+            multiline
+          />
+        </SectionCard>
+      </>
+    );
+  };
+
+  const renderSettingsHome = () => (
+    <View style={styles.settingsGrid}>
+      <Pressable style={[styles.settingsCardBtn, styles.settingsCardTraits]} onPress={() => setSettingsSection('traits')}>
+        <Text style={styles.settingsCardText}>Черты характера</Text>
+      </Pressable>
+      <Pressable
+        style={[styles.settingsCardBtn, styles.settingsCardEmotions]}
+        onPress={() => setSettingsSection('emotions')}
+      >
+        <Text style={styles.settingsCardText}>Эмоции</Text>
+      </Pressable>
+      <Pressable style={[styles.settingsCardBtn, styles.settingsCardHabits]} onPress={() => setSettingsSection('habits')}>
+        <Text style={styles.settingsCardText}>Привычки</Text>
+      </Pressable>
+      <Pressable style={[styles.settingsCardBtn, styles.settingsCardValues]} onPress={() => setSettingsSection('values')}>
+        <Text style={styles.settingsCardText}>Ценности и убеждения</Text>
+      </Pressable>
+    </View>
+  );
+
   if (!loaded) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
@@ -353,7 +449,7 @@ export default function App() {
               </>
             ) : null}
 
-            {onboardingStep === 2 ? renderSettingsContent() : null}
+            {onboardingStep === 2 ? renderTraitsSettings() : null}
 
             {onboardingStep === 3 ? (
               <>
@@ -400,7 +496,7 @@ export default function App() {
       <View style={[styles.topStatsBar, { paddingTop: androidTopInset + 8 }]}>
         <View style={styles.topStatsLeft}>
           <Text style={styles.topStatItem}>Цели: {activeGoals}</Text>
-          <Text style={styles.topStatItem}>Сегодня: {todayCheckin ? `${todayCheckin.score}/5` : '-'}</Text>
+          <Text style={styles.topStatItem}>Чек-ин: {todayCheckin ? `${todayCheckin.score}/5` : '-'}</Text>
           <Text style={styles.topStatItem}>7д: {weeklySuccess}%</Text>
         </View>
         <Pressable style={styles.profileBtn} onPress={() => selectMenuItem('profile')}>
@@ -434,13 +530,7 @@ export default function App() {
           />
         ) : null}
 
-        {activeTab === 'settings' ? (
-          <>
-            <Text style={styles.appTitle}>Настройки</Text>
-            <Text style={styles.appSubtitle}>Цели, напоминания и окно времени</Text>
-            {renderSettingsContent()}
-          </>
-        ) : null}
+        {activeTab === 'settings' ? (settingsSection ? renderSettingsSection() : renderSettingsHome()) : null}
 
         {activeTab === 'premium' ? (
           <PremiumScreen
@@ -514,6 +604,49 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 24,
   },
+  settingsGrid: {
+    gap: 12,
+  },
+  settingsCardBtn: {
+    borderRadius: 16,
+    minHeight: 96,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#d6e1f8',
+  },
+  settingsCardTraits: {
+    backgroundColor: '#eef4ff',
+  },
+  settingsCardEmotions: {
+    backgroundColor: '#eefaf5',
+  },
+  settingsCardHabits: {
+    backgroundColor: '#fff8eb',
+  },
+  settingsCardValues: {
+    backgroundColor: '#f5f0ff',
+  },
+  settingsCardText: {
+    color: '#2a3a5f',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  backBtn: {
+    alignSelf: 'flex-start',
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#d6e1f8',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#fff',
+  },
+  backBtnText: {
+    color: '#3f568f',
+    fontWeight: '700',
+  },
   appTitle: {
     fontSize: 28,
     fontWeight: '800',
@@ -552,6 +685,10 @@ const styles = StyleSheet.create({
     color: '#1d2b50',
     backgroundColor: '#fff',
     marginBottom: 8,
+  },
+  noteInput: {
+    minHeight: 90,
+    textAlignVertical: 'top',
   },
   counterRow: {
     flexDirection: 'row',
@@ -617,3 +754,4 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
 });
+
