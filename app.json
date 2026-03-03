@@ -23,9 +23,6 @@
         "backgroundColor": "#f2f6ff"
       },
       "package": "com.characterplus.app"
-    },
-    "plugins": [
-      "expo-notifications"
-    ]
+    }
   }
 }

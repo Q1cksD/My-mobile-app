@@ -1,0 +1,16 @@
+﻿export const colors = {
+  bg0: '#0B0F1A',
+  bg1: '#121A2B',
+  bg2: '#1A2440',
+  card: 'rgba(255,255,255,0.06)',
+  cardBorder: 'rgba(255,255,255,0.10)',
+  text: '#FFFFFF',
+  text2: 'rgba(255,255,255,0.70)',
+  text3: 'rgba(255,255,255,0.45)',
+  primary: '#7C5CFF',
+  primary2: '#9A84FF',
+  blue: '#3D7BFF',
+  danger: '#FF5C7A',
+  divider: 'rgba(255,255,255,0.08)',
+  tabBar: 'rgba(10,12,20,0.92)',
+};
