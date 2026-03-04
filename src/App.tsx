@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { GlassCard } from './components/ui/GlassCard';
 import { PrimaryButton } from './components/ui/PrimaryButton';
+import { BackgroundDecor } from './components/ui/BackgroundDecor';
 import { Screen } from './components/ui/Screen';
 import { getDisciplineTechniqueById } from './domain/discipline/techniques';
 import { DisciplineTechniquesIntroScreen } from './screens/DisciplineTechniquesIntroScreen';
@@ -318,8 +319,11 @@ function AppContent() {
   if (!isHydrated) {
     return (
       <Screen>
-        <View style={styles.loadingWrap}>
-          <Text style={styles.loadingText}>Загрузка...</Text>
+        <View style={styles.contentArea}>
+          <BackgroundDecor style={StyleSheet.absoluteFillObject} />
+          <View style={[styles.contentAboveDecor, styles.loadingWrap]}>
+            <Text style={styles.loadingText}>Загрузка...</Text>
+          </View>
         </View>
       </Screen>
     );
@@ -328,8 +332,10 @@ function AppContent() {
   if (!state.onboardingCompleted) {
     return (
       <Screen>
-        <View style={[styles.onboardingWrap, { paddingTop: topInset + spacing.lg }]}>
-          <ScrollView contentContainerStyle={styles.onboardingBody} showsVerticalScrollIndicator={false}>
+        <View style={styles.contentArea}>
+          <BackgroundDecor style={StyleSheet.absoluteFillObject} />
+          <View style={[styles.contentAboveDecor, styles.onboardingWrap, { paddingTop: topInset + spacing.lg }]}>
+            <ScrollView contentContainerStyle={styles.onboardingBody} showsVerticalScrollIndicator={false}>
             {onboardingStep === 1 ? (
               <>
                 <Text style={styles.onboardingTitle}>Добро пожаловать</Text>
@@ -477,22 +483,23 @@ function AppContent() {
                 </GlassCard>
               </>
             ) : null}
-          </ScrollView>
+            </ScrollView>
 
-          <View style={styles.onboardingActions}>
-            {onboardingStep > 1 ? <PrimaryButton label="Назад" variant="secondary" onPress={goBackOnboarding} /> : null}
+            <View style={styles.onboardingActions}>
+              {onboardingStep > 1 ? <PrimaryButton label="Назад" variant="secondary" onPress={goBackOnboarding} /> : null}
 
-            {onboardingStep === 1 ? <PrimaryButton label="Начать путь" onPress={goFromWelcome} /> : null}
+              {onboardingStep === 1 ? <PrimaryButton label="Начать путь" onPress={goFromWelcome} /> : null}
 
-            {onboardingStep === 2 ? (
-              <PrimaryButton label="Далее" onPress={goFromIntroProfile} disabled={!isStepTwoValid} />
-            ) : null}
+              {onboardingStep === 2 ? (
+                <PrimaryButton label="Далее" onPress={goFromIntroProfile} disabled={!isStepTwoValid} />
+              ) : null}
 
-            {onboardingStep === 3 ? <PrimaryButton label="Сохранить" onPress={goFromMotivation} /> : null}
+              {onboardingStep === 3 ? <PrimaryButton label="Сохранить" onPress={goFromMotivation} /> : null}
 
-            {onboardingStep === 4 ? (
-              <PrimaryButton label="Начать" onPress={finishOnboarding} disabled={!canFinishOnboarding} />
-            ) : null}
+              {onboardingStep === 4 ? (
+                <PrimaryButton label="Начать" onPress={finishOnboarding} disabled={!canFinishOnboarding} />
+              ) : null}
+            </View>
           </View>
         </View>
       </Screen>
@@ -523,44 +530,49 @@ function AppContent() {
         </View>
       </View>
 
-      {isProfileOpen ? (
-        <View style={[styles.screen, styles.profileScreen]}>
-          <GlassCard>
-            <Text style={styles.profileTitle}>Профиль</Text>
-            <Text style={styles.profileText}>{state.user.name ? `Пользователь: ${state.user.name}` : 'Профиль пользователя'}</Text>
-            <Pressable style={styles.resetButton} onPress={resetOnboarding}>
-              <Text style={styles.resetButtonText}>Сбросить онбординг</Text>
-            </Pressable>
-          </GlassCard>
+      <View style={styles.contentArea}>
+        <BackgroundDecor style={StyleSheet.absoluteFillObject} />
+        <View style={styles.contentAboveDecor}>
+          {isProfileOpen ? (
+            <View style={[styles.screen, styles.profileScreen]}>
+              <GlassCard>
+                <Text style={styles.profileTitle}>Профиль</Text>
+                <Text style={styles.profileText}>{state.user.name ? `Пользователь: ${state.user.name}` : 'Профиль пользователя'}</Text>
+                <Pressable style={styles.resetButton} onPress={resetOnboarding}>
+                  <Text style={styles.resetButtonText}>Сбросить онбординг</Text>
+                </Pressable>
+              </GlassCard>
+            </View>
+          ) : programOverlayRoute?.screen === 'techniques_intro' ? (
+            <DisciplineTechniquesIntroScreen
+              isFirstSetup={programOverlayRoute.firstTime}
+              onContinue={continueTechniquesIntro}
+              onSkip={skipTechniquesIntro}
+            />
+          ) : programOverlayRoute?.screen === 'techniques' ? (
+            <DisciplineTechniquesScreen
+              isFirstSetup={programOverlayRoute.firstTime}
+              onDone={closeProgramOverlay}
+              onOpenDetails={(techniqueId) =>
+                setProgramOverlayRoute({
+                  screen: 'technique',
+                  techniqueId,
+                  fromList: true,
+                  firstTime: programOverlayRoute.firstTime,
+                })
+              }
+            />
+          ) : programOverlayRoute?.screen === 'technique' ? (
+            <TechniqueDetailsScreen techniqueId={programOverlayRoute.techniqueId} onBack={backFromTechniqueDetails} />
+          ) : activeTab === 'program' ? (
+            <ProgramScreen onOpenTechniques={openTechniques} onOpenTechniqueDetails={openTechniqueDetails} />
+          ) : activeTab === 'progress' ? (
+            <ProgressScreen onOpenProgram={() => selectTab('program')} />
+          ) : (
+            <CharacterScreen onOpenProgram={() => selectTab('program')} />
+          )}
         </View>
-      ) : programOverlayRoute?.screen === 'techniques_intro' ? (
-        <DisciplineTechniquesIntroScreen
-          isFirstSetup={programOverlayRoute.firstTime}
-          onContinue={continueTechniquesIntro}
-          onSkip={skipTechniquesIntro}
-        />
-      ) : programOverlayRoute?.screen === 'techniques' ? (
-        <DisciplineTechniquesScreen
-          isFirstSetup={programOverlayRoute.firstTime}
-          onDone={closeProgramOverlay}
-          onOpenDetails={(techniqueId) =>
-            setProgramOverlayRoute({
-              screen: 'technique',
-              techniqueId,
-              fromList: true,
-              firstTime: programOverlayRoute.firstTime,
-            })
-          }
-        />
-      ) : programOverlayRoute?.screen === 'technique' ? (
-        <TechniqueDetailsScreen techniqueId={programOverlayRoute.techniqueId} onBack={backFromTechniqueDetails} />
-      ) : activeTab === 'program' ? (
-        <ProgramScreen onOpenTechniques={openTechniques} onOpenTechniqueDetails={openTechniqueDetails} />
-      ) : activeTab === 'progress' ? (
-        <ProgressScreen onOpenProgram={() => selectTab('program')} />
-      ) : (
-        <CharacterScreen onOpenProgram={() => selectTab('program')} />
-      )}
+      </View>
 
       {!isProfileOpen && !programOverlayRoute ? (
         <View style={styles.tabBar}>
@@ -599,6 +611,16 @@ const styles = StyleSheet.create({
   loadingText: {
     ...typography.body,
     color: colors.text2,
+  },
+  contentArea: {
+    flex: 1,
+    position: 'relative',
+    overflow: 'hidden',
+    backgroundColor: colors.bg0,
+  },
+  contentAboveDecor: {
+    flex: 1,
+    zIndex: 1,
   },
   onboardingWrap: {
     flex: 1,
@@ -787,7 +809,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: 'rgba(255,255,255,0.03)',
+    backgroundColor: colors.bg0,
     borderBottomWidth: 1,
     borderBottomColor: colors.divider,
   },
@@ -858,7 +880,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: spacing.md,
-    backgroundColor: colors.tabBar,
+    backgroundColor: colors.bg0,
   },
   tabButton: {
     flex: 1,

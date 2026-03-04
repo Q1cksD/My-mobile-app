@@ -1,10 +1,10 @@
 ﻿import { ReactNode } from 'react';
-import { StyleSheet, View, ViewStyle } from 'react-native';
+import { StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
 import { colors, radius, spacing } from '../../theme';
 
 interface GlassCardProps {
   children: ReactNode;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
 }
 
 export function GlassCard({ children, style }: GlassCardProps) {

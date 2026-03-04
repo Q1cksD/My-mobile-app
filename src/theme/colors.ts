@@ -1,7 +1,7 @@
 ﻿export const colors = {
   bg0: '#0B0F1A',
   bg1: '#121A2B',
-  bg2: '#1A2440',
+  bg2: '#1a2440',
   card: 'rgba(255,255,255,0.06)',
   cardBorder: 'rgba(255,255,255,0.10)',
   text: '#FFFFFF',
