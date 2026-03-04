@@ -381,7 +381,6 @@ export function ProgramScreen({ onOpenTechniques, onOpenTechniqueDetails }: Prog
                 });
 
                 const isActive = state.disciplineTechniquesActive.includes(item.technique.id);
-                const isCentered = centerIndexReal === item.realIndex;
 
                 return (
                   <Animated.View
@@ -398,7 +397,6 @@ export function ProgramScreen({ onOpenTechniques, onOpenTechniqueDetails }: Prog
                       style={[
                         styles.techniqueSlide,
                         { width: itemWidth, minHeight: itemHeight, maxHeight: itemHeight, height: itemHeight },
-                        isCentered ? styles.techniqueSlideCentered : undefined,
                         isActive ? styles.techniqueSlideActive : undefined,
                       ]}
                     >
@@ -685,14 +683,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.10)',
     overflow: 'visible',
-  },
-  techniqueSlideCentered: {
-    borderColor: 'rgba(255,255,255,0.14)',
-    shadowColor: '#000000',
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 4,
   },
   techniqueSlideActive: {
     borderColor: 'rgba(124,92,255,0.68)',
